@@ -1,0 +1,76 @@
+# ======================================================
+#         Hypixel Skyblock Profile Management Layout
+# ======================================================
+
+title: "<dark_gray>Profile Management</dark_gray>"
+size: 36 # 4 Rows (9 * 4)
+
+fill-item:
+  material: GRAY_STAINED_GLASS_PANE
+  name: " "
+
+# The 5 profile slots (Row 2, centered: 11, 12, 13, 14, 15)
+profile-slots: [11, 12, 13, 14, 15]
+
+# Items configuration for each slot state
+items:
+  active-profile:
+    material: EMERALD_BLOCK
+    name: "<yellow>Profile: <green>{profile_name}</green></yellow>"
+    lore:
+      - "<gray>Selected slot</gray>"
+      - ""
+      - "<gray>ID: <white>{profile_id}</white></gray>"
+      - "<gray>Created: <white>{creation_date}</white></gray>"
+      - "<gray>Last Played: <white>{last_played}</white></gray>"
+      - ""
+      - "<gray>Purse Coins: <gold>{balance}</gold></gray>"
+      - ""
+      - "<green>You are playing on this profile!</green>"
+
+  inactive-profile:
+    material: GRASS_BLOCK
+    name: "<yellow>Profile: <green>{profile_name}</green></yellow>"
+    lore:
+      - "<gray>Slot in use</gray>"
+      - ""
+      - "<gray>ID: <white>{profile_id}</white></gray>"
+      - "<gray>Created: <white>{creation_date}</white></gray>"
+      - "<gray>Last Played: <white>{last_played}</white></gray>"
+      - ""
+      - "<gray>Purse Coins: <gold>{balance}</gold></gray>"
+      - ""
+      - "<yellow>Click to switch to this profile!</yellow>"
+      - "<red>Shift + Click to delete this profile!</red>"
+
+  empty-slot:
+    material: DIRT
+    name: "<yellow>Empty Profile Slot</yellow>"
+    lore:
+      - "<gray>Available</gray>"
+      - ""
+      - "<gray>Use this slot if you want to start a new adventure.</gray>"
+      - ""
+      - "<gray>Each profile has its own:</gray>"
+      - "<gray> • Inventory & Armor</gray>"
+      - "<gray> • Ender Chest</gray>"
+      - "<gray> • Stats & Progression</gray>"
+      - "<gray> • Permissions</gray>"
+      - ""
+      - "<yellow>Click to create solo profile!</yellow>"
+
+  locked-slot:
+    material: BEDROCK
+    name: "<red>Locked profile slot</red>"
+    lore:
+      - "<gray>Unavailable</gray>"
+      - ""
+      - "<gray>Requires higher rank/permission node:</gray>"
+      - "<aqua>zenprofiles.max.{slot_number}</aqua>"
+
+close-button:
+  slot: 31
+  material: BARRIER
+  name: "<red><bold>Close</bold></red>"
+  lore:
+    - "<gray>Click to exit.</gray>"

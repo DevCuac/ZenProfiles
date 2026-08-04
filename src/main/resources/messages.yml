@@ -1,0 +1,46 @@
+# ======================================================
+#             ZenProfiles Messages Config
+# ======================================================
+
+prefix: "<dark_gray>[<gradient:aqua:blue>ZenProfiles</gradient>]</dark_gray> "
+
+no-permission: "<red>No tienes permiso para ejecutar este comando.</red>"
+player-only: "<red>Este comando solo puede ser ejecutado por un jugador.</red>"
+reload-success: "<green>¡Configuración, menús y mensajes recargados con éxito!</green>"
+setspawn-success: "<green>¡Ubicación del spawn de perfiles establecida correctamente en tu posición actual!</green>"
+
+profile:
+  created: "<green>¡Perfil <yellow>{profile_name}</yellow> creado correctamente! Cambiando a tu nuevo perfil...</green>"
+  deleted: "<red>El perfil <yellow>{profile_name}</yellow> ha sido eliminado permanentemente.</red>"
+  selected: "<green>¡Perfil activo cambiado a <yellow>{profile_name}</yellow>!</green>"
+  already-active: "<yellow>Ya estás jugando en el perfil <aqua>{profile_name}</aqua>.</yellow>"
+  not-found: "<red>No se encontró ningún perfil con el nombre o ID <yellow>{profile_name}</yellow>.</red>"
+  limit-reached: "<red>Has alcanzado el límite máximo de perfiles (<yellow>{max}</yellow>).</red>"
+  invalid-name: "<red>El nombre del perfil no es válido. Debe ser alfanumérico y tener entre 3 y 16 caracteres.</red>"
+  name-taken: "<red>Ya tienes un perfil llamado <yellow>{profile_name}</yellow>.</red>"
+  cannot-delete-active: "<red>No puedes eliminar el perfil en el que estás jugando actualmente. Cambia a otro perfil primero.</red>"
+  type-name-prompt: "<yellow>Escribe el nombre para tu nuevo perfil en el chat (o escribe <red>cancelar</red>):</yellow>"
+  creation-cancelled: "<red>Creación de perfil cancelada.</red>"
+
+switch:
+  countdown: "<yellow>Cambiando al perfil <aqua>{profile_name}</aqua> en <aqua>{seconds}</aqua> segundos... ¡No te muevas!</yellow>"
+  cancelled-move: "<red>¡El cambio de perfil se ha cancelado porque te has movido!</red>"
+  cancelled-combat: "<red>¡No puedes cambiar de perfil mientras estás en combate!</red>"
+  in-combat: "<red>¡Estás en combate! Espera unos segundos antes de intentar cambiar de perfil.</red>"
+
+gui:
+  profile-item:
+    name: "<gradient:aqua:blue>Perfil:</gradient> <yellow>{profile_name}</yellow>"
+    lore-active:
+      - "<gray>ID: <white>{profile_id}</white></gray>"
+      - "<gray>Creado: <white>{creation_date}</white></gray>"
+      - "<gray>Última sesión: <white>{last_played}</white></gray>"
+      - ""
+      - "<green>✔ Perfil activo actualmente</green>"
+    lore-inactive:
+      - "<gray>ID: <white>{profile_id}</white></gray>"
+      - "<gray>Creado: <white>{creation_date}</white></gray>"
+      - "<gray>Última sesión: <white>{last_played}</white></gray>"
+      - ""
+      - "<yellow>Haz clic para cambiar a este perfil.</yellow>"
+      - "<red>Shift + Clic para eliminar este perfil.</red>"

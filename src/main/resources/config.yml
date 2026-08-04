@@ -1,0 +1,68 @@
+# ======================================================
+#                ZenProfiles Configuration
+# ======================================================
+
+# Storage provider: YAML
+storage:
+  type: YAML
+
+# Default maximum profiles per player if no zenprofiles.max.<number> permission is assigned
+default-max-profiles: 3
+
+# Profile switching mechanics
+profile-switching:
+  # Delay in seconds before profile switch is executed (0 to disable)
+  delay-seconds: 3
+  # Cancel switch if player moves block during countdown
+  cancel-on-move: true
+  
+  # Prevent switching while in combat
+  combat-check:
+    enabled: true
+    # Duration in seconds player is marked "in combat" after attacking or receiving damage from entity
+    duration-seconds: 10
+
+# Spawn Teleportation Settings
+spawn:
+  # Teleport player to spawn when creating a NEW profile
+  teleport-on-new-profile: true
+  # Always teleport to spawn whenever switching profiles (if false, teleports to saved profile location)
+  teleport-on-every-switch: false
+  
+  # Spawn Location definition
+  use-world-spawn: true # If true, uses Bukkit.getWorlds().get(0).getSpawnLocation()
+  custom-spawn:
+    world: "world"
+    x: 0.5
+    y: 64.0
+    z: 0.5
+    yaw: 0.0
+    pitch: 0.0
+
+# Profile naming validation & creation settings
+profile-naming:
+  regex: "^[a-zA-Z0-9_]{3,16}$"
+  blacklisted-names:
+    - "admin"
+    - "null"
+    - "console"
+
+# Skyblock Fruit Names for UI creation
+skyblock-fruit-names:
+  - "Cucumber"
+  - "Fruit"
+  - "Kiwi"
+  - "Peach"
+  - "Mango"
+  - "Blueberry"
+  - "Zucchini"
+  - "Papaya"
+  - "Pineapple"
+  - "Coconut"
+  - "Lemon"
+  - "Lime"
+
+# LuckPerms per-profile context integration
+luckperms:
+  enabled: true
+  context-key: "profile" # Resulting context node will be zenprofiles:profile=<profile_uuid>

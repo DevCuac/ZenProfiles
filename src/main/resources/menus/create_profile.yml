@@ -1,0 +1,29 @@
+# ======================================================
+#             Create Profile Menu Layout
+# ======================================================
+
+title: "<dark_gray>Crear Nuevo Perfil</dark_gray>"
+size: 36
+
+fill-item:
+  material: GRAY_STAINED_GLASS_PANE
+  name: " "
+
+# Preset Hypixel Skyblock Profile Options
+preset-slots: [10, 11, 12, 13, 14, 15, 16]
+
+# Custom Name via Chat prompt button
+custom-name-button:
+  slot: 31
+  material: PAPER
+  name: "<yellow><bold>Nombre Personalizado</bold></yellow>"
+  lore:
+    - "<gray>Haz clic para escribir un nombre</gray>"
+    - "<gray>personalizado en el chat.</gray>"
+
+back-button:
+  slot: 35
+  material: ARROW
+  name: "<red><bold>Volver</bold></red>"
+  lore:
+    - "<gray>Regresar a la lista de perfiles.</gray>"

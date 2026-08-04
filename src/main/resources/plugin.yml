@@ -1,0 +1,25 @@
+name: ZenProfiles
+version: '${project.version}'
+main: com.cuac_xd.zenprofiles.ZenProfiles
+api-version: '1.21'
+author: cuac_xd
+description: Advanced RPG profile management plugin inspired by Hypixel Skyblock with ZEN suite & Vault integration.
+softdepend: [LuckPerms, PlaceholderAPI, Vault, ZenBank, ZenBoosters, ZenCosmetics, ZenDuels, ZenDungeons, ZenFairy, ZenForges, ZenMilestones, ZenPvPCore, ZenQuests, ZenRewards, ZenSacks, ZenRankups]
+
+commands:
+  profiles:
+    description: Main command for ZenProfiles.
+    aliases: [profile, zprofiles, zprofile]
+    permission: zenprofiles.command.profile
+    usage: /profile [create|select|delete|list|setspawn|admin|reload]
+
+permissions:
+  zenprofiles.command.profile:
+    description: Allows access to /profile command
+    default: true
+  zenprofiles.admin:
+    description: Full admin access for ZenProfiles
+    default: op
+  zenprofiles.max.default:
+    description: Grants default profile limit
+    default: true

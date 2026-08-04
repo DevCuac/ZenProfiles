@@ -1,0 +1,25 @@
+# ======================================================
+#             Confirm Delete Menu Layout
+# ======================================================
+
+title: "<dark_red>¿Eliminar {profile_name}?</dark_red>"
+size: 27
+
+fill-item:
+  material: RED_STAINED_GLASS_PANE
+  name: " "
+
+confirm-button:
+  slot: 11
+  material: LIME_TERRACOTTA
+  name: "<green><bold>¡CONFIRMAR ELIMINACIÓN!</bold></green>"
+  lore:
+    - "<gray>Esta acción <red>NO SE PUEDE DESHACER</red>.</gray>"
+    - "<gray>El perfil <yellow>{profile_name}</yellow> será borrado.</gray>"
+
+cancel-button:
+  slot: 15
+  material: RED_TERRACOTTA
+  name: "<red><bold>CANCELAR</bold></red>"
+  lore:
+    - "<gray>Regresar a la selección de perfiles.</gray>"
