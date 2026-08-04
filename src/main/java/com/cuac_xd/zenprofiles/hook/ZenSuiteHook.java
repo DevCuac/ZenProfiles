@@ -4,6 +4,7 @@ import com.cuac_xd.zenprofiles.ZenProfiles;
 import com.cuac_xd.zenprofiles.api.event.ProfileCreateEvent;
 import com.cuac_xd.zenprofiles.api.event.ProfileDeleteEvent;
 import com.cuac_xd.zenprofiles.api.event.ProfileSwitchEvent;
+
 import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -13,6 +14,13 @@ import org.bukkit.plugin.Plugin;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * ZEN Plugins Suite integration hook.
+ * Detects loaded ZEN suite plugins (ZenBank, ZenSacks, ZenFairy, ZenRankups, etc.)
+ * and logs native ZenProfilesAPI bridge status.
+ *
+ * @author cuac_xd
+ */
 public class ZenSuiteHook implements Listener {
 
     private final ZenProfiles plugin;
@@ -38,6 +46,9 @@ public class ZenSuiteHook implements Listener {
         this.plugin = plugin;
     }
 
+    /**
+     * Detects enabled ZEN suite plugins on server startup.
+     */
     public void setup() {
         detectedZenPlugins.clear();
         for (String pName : zenSuitePlugins) {
@@ -57,20 +68,17 @@ public class ZenSuiteHook implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onProfileSwitch(ProfileSwitchEvent event) {
-        if (detectedZenPlugins.isEmpty()) return;
-        // Event fired for ZEN plugins to catch via Bukkit EventManager
+        // Broadcasts to third-party ZEN plugin listeners
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onProfileCreate(ProfileCreateEvent event) {
-        if (detectedZenPlugins.isEmpty()) return;
-        // Event fired for ZEN plugins
+        // Broadcasts to third-party ZEN plugin listeners
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onProfileDelete(ProfileDeleteEvent event) {
-        if (detectedZenPlugins.isEmpty()) return;
-        // Event fired for ZEN plugins
+        // Broadcasts to third-party ZEN plugin listeners
     }
 
     public List<String> getDetectedZenPlugins() {

@@ -8,16 +8,31 @@ import org.bukkit.entity.Player;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Public developer API entry point for ZenProfiles.
+ * Exposes methods to query active profiles, retrieve profile UUIDs for database operations,
+ * and initiate profile switches programmatically.
+ *
+ * @author cuac_xd
+ */
 public class ZenProfilesAPI {
 
     private static ZenProfiles instance;
 
+    /**
+     * Internal API initializer.
+     *
+     * @param plugin Main plugin instance.
+     */
     public static void init(ZenProfiles plugin) {
         instance = plugin;
     }
 
     /**
-     * Gets the currently active profile of an online player.
+     * Gets the currently active Profile of an online player.
+     *
+     * @param player The target player.
+     * @return Active Profile object, or null if none loaded.
      */
     public static Profile getActiveProfile(Player player) {
         if (instance == null || player == null) return null;
@@ -25,7 +40,10 @@ public class ZenProfilesAPI {
     }
 
     /**
-     * Gets the active profile UUID of a player, or the player's own account UUID if no profile is active.
+     * Gets the active profile UUID of a player, or falls back to the player's account UUID.
+     *
+     * @param player The target player.
+     * @return Active profile UUID or account UUID.
      */
     public static UUID getActiveProfileUUID(Player player) {
         if (player == null) return null;
@@ -35,6 +53,9 @@ public class ZenProfilesAPI {
 
     /**
      * Gets the active profile UUID of an online player by player account UUID.
+     *
+     * @param playerUuid The player account UUID.
+     * @return Active profile UUID or account UUID.
      */
     public static UUID getActiveProfileUUID(UUID playerUuid) {
         if (playerUuid == null) return null;
@@ -46,14 +67,20 @@ public class ZenProfilesAPI {
     }
 
     /**
-     * Checks if a player has an active profile loaded.
+     * Checks if an online player has an active profile loaded.
+     *
+     * @param player The target player.
+     * @return true if an active profile is present.
      */
     public static boolean hasActiveProfile(Player player) {
         return getActiveProfile(player) != null;
     }
 
     /**
-     * Gets all profiles owned by a player.
+     * Gets all profiles owned by a player UUID.
+     *
+     * @param playerUuid The player account UUID.
+     * @return List of profiles.
      */
     public static List<Profile> getProfiles(UUID playerUuid) {
         if (instance == null || playerUuid == null) return List.of();
@@ -61,7 +88,10 @@ public class ZenProfilesAPI {
     }
 
     /**
-     * Initiates a profile switch for a player to a target profile.
+     * Initiates an asynchronous profile switch for a player.
+     *
+     * @param player The target player.
+     * @param targetProfile The target profile to switch to.
      */
     public static void switchProfile(Player player, Profile targetProfile) {
         if (instance != null && player != null && targetProfile != null) {

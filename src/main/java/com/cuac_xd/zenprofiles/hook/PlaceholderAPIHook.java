@@ -2,25 +2,30 @@ package com.cuac_xd.zenprofiles.hook;
 
 import com.cuac_xd.zenprofiles.ZenProfiles;
 import com.cuac_xd.zenprofiles.model.Profile;
+
 import me.clip.placeholderapi.expansion.PlaceholderExpansion;
 import org.bukkit.Bukkit;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.List;
+
+/**
+ * PlaceholderAPI expansion integration hook.
+ * Exposes %zenprofiles_profile_name%, %zenprofiles_profile_id%,
+ * %zenprofiles_total_profiles%, %zenprofiles_max_profiles%, %zenprofiles_coins%,
+ * and %zenprofiles_formatted_balance% placeholders.
+ *
+ * @author cuac_xd
+ */
 public class PlaceholderAPIHook extends PlaceholderExpansion {
 
     private final ZenProfiles plugin;
 
     public PlaceholderAPIHook(ZenProfiles plugin) {
         this.plugin = plugin;
-    }
-
-    public void registerExpansion() {
-        if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null) {
-            this.register();
-            plugin.getLogger().info("PlaceholderAPI expansion registered successfully!");
-        }
     }
 
     @Override
@@ -44,32 +49,35 @@ public class PlaceholderAPIHook extends PlaceholderExpansion {
     }
 
     @Override
-    public @Nullable String onPlaceholderRequest(Player player, @NotNull String params) {
-        if (player == null) return "";
+    public @Nullable String onRequest(OfflinePlayer offlinePlayer, @NotNull String params) {
+        if (offlinePlayer == null) return "";
 
-        Profile active = plugin.getProfileManager().getActiveProfile(player.getUniqueId());
+        Player player = offlinePlayer.isOnline() ? offlinePlayer.getPlayer() : null;
+
+        Profile active = plugin.getProfileManager().getActiveProfile(offlinePlayer.getUniqueId());
 
         switch (params.toLowerCase()) {
             case "profile_name":
-            case "name":
                 return active != null ? active.getName() : "None";
+
             case "profile_id":
-            case "id":
                 return active != null ? active.getProfileId().toString() : "None";
+
             case "total_profiles":
-            case "total":
-                return String.valueOf(plugin.getProfileManager().getPlayerProfiles(player.getUniqueId()).size());
+                List<Profile> profiles = plugin.getProfileManager().getPlayerProfiles(offlinePlayer.getUniqueId());
+                return String.valueOf(profiles.size());
+
             case "max_profiles":
-            case "max":
-                return String.valueOf(plugin.getProfileManager().getMaxProfiles(player));
+                return player != null ? String.valueOf(plugin.getProfileManager().getMaxProfiles(player)) : "3";
+
             case "coins":
-            case "balance":
-                return active != null ? String.format("%.2f", active.getData().getBalance()) : "0.00";
+                return active != null ? String.valueOf(active.getData().getBalance()) : "0.0";
+
             case "formatted_balance":
             case "formatted_coins":
-                return active != null ? String.format("$%,.2f", active.getData().getBalance()) : "$0.00";
-            default:
-                return null;
+                return active != null ? plugin.getMessageManager().formatCoins(active.getData().getBalance()) : "0.00";
         }
+
+        return null;
     }
 }

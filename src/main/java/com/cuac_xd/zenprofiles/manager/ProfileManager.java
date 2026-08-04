@@ -7,105 +7,158 @@ import com.cuac_xd.zenprofiles.api.event.ProfilePreSwitchEvent;
 import com.cuac_xd.zenprofiles.api.event.ProfileSwitchEvent;
 import com.cuac_xd.zenprofiles.model.Profile;
 import com.cuac_xd.zenprofiles.model.ProfileData;
+
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
+import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.permissions.PermissionAttachment;
 import org.bukkit.potion.PotionEffect;
-import org.bukkit.scheduler.BukkitRunnable;
-import org.bukkit.scheduler.BukkitTask;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.regex.Pattern;
 
+/**
+ * Core Profile Manager.
+ * Orchestrates profile loading, creation, deletion, state synchronization,
+ * combat tracking, fruit-name generation, and asynchronous profile switching.
+ *
+ * @author cuac_xd
+ */
 public class ProfileManager {
 
     private final ZenProfiles plugin;
 
-    // Cache of profiles per player: playerUuid -> List<Profile>
+    // Cache of loaded profiles per player UUID: UUID -> List<Profile>
     private final Map<UUID, List<Profile>> loadedProfiles = new ConcurrentHashMap<>();
-    // Map of active profile: playerUuid -> Profile
+
+    // Map of active profiles per player UUID: UUID -> Profile
     private final Map<UUID, Profile> activeProfiles = new ConcurrentHashMap<>();
-    // Per-profile permission attachments: playerUuid -> PermissionAttachment
-    private final Map<UUID, PermissionAttachment> perProfileAttachments = new ConcurrentHashMap<>();
 
-    // Combat tracking: playerUuid -> timestamp millis
-    private final Map<UUID, Long> combatTimestamps = new ConcurrentHashMap<>();
+    // Map tracking combat timestamps for combat-check validation
+    private final Map<UUID, Long> combatMap = new ConcurrentHashMap<>();
 
-    // Profile switch countdowns: playerUuid -> BukkitTask
-    private final Map<UUID, BukkitTask> switchTasks = new ConcurrentHashMap<>();
-
-    // Chat prompt input for profile creation: playerUuid
-    private final Set<UUID> pendingChatInput = ConcurrentHashMap.newKeySet();
+    // Pre-configured fruit name list for 1-click automatic profile creation
+    private final List<String> fruitNames = new ArrayList<>();
 
     public ProfileManager(ZenProfiles plugin) {
         this.plugin = plugin;
+        loadFruitNames();
     }
 
-    public CompletableFuture<Void> loadPlayerProfiles(Player player) {
-        return plugin.getStorage().loadProfiles(player.getUniqueId()).thenAccept(profiles -> {
-            loadedProfiles.put(player.getUniqueId(), profiles);
+    /**
+     * Loads the fruit name list from config.yml.
+     */
+    public void loadFruitNames() {
+        fruitNames.clear();
+        List<String> configFruits = plugin.getConfig().getStringList("skyblock-fruit-names");
+        if (configFruits != null && !configFruits.isEmpty()) {
+            fruitNames.addAll(configFruits);
+        } else {
+            fruitNames.addAll(List.of("Cucumber", "Kiwi", "Peach", "Mango", "Papaya", "Pineapple", "Coconut", "Watermelon", "Grape", "Lemon"));
+        }
+    }
 
-            if (profiles.isEmpty()) {
-                // Create a default first profile for new player
-                Profile defaultProfile = createProfileInstance(player, "Default");
-                profiles.add(defaultProfile);
-                plugin.getStorage().saveProfile(defaultProfile);
-                Bukkit.getPluginManager().callEvent(new ProfileCreateEvent(player, defaultProfile));
+    /**
+     * Generates the next available fruit name for a player.
+     *
+     * @param playerUuid The UUID of the player account.
+     * @return An unassigned fruit name string.
+     */
+    public String generateNextFruitName(UUID playerUuid) {
+        List<Profile> existing = getPlayerProfiles(playerUuid);
+        List<String> usedNames = existing.stream()
+                .map(p -> p.getName().toLowerCase())
+                .toList();
+
+        for (String fruit : fruitNames) {
+            if (!usedNames.contains(fruit.toLowerCase())) {
+                return fruit;
             }
+        }
+        return "Fruit_" + (existing.size() + 1);
+    }
 
-            // Default to most recently played profile
-            Profile toActivate = profiles.get(0);
-            applyProfile(player, toActivate);
+    /**
+     * Asynchronously loads all profiles owned by a player upon join.
+     *
+     * @param player The player instance.
+     * @return CompletableFuture completing with the loaded profile list.
+     */
+    public CompletableFuture<List<Profile>> loadPlayerProfiles(Player player) {
+        UUID uuid = player.getUniqueId();
+        return plugin.getStorage().loadProfiles(uuid).thenApply(profiles -> {
+            loadedProfiles.put(uuid, profiles);
+
+            if (!profiles.isEmpty()) {
+                // Determine most recently played profile
+                Profile mostRecent = profiles.stream()
+                        .max((p1, p2) -> Long.compare(p1.getLastPlayed(), p2.getLastPlayed()))
+                        .orElse(profiles.get(0));
+
+                activeProfiles.put(uuid, mostRecent);
+
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    applyProfileToPlayer(player, mostRecent);
+                });
+            } else {
+                // Auto-create initial profile for first-time players
+                String initialName = generateNextFruitName(uuid);
+                createProfile(uuid, initialName).thenAccept(newProfile -> {
+                    if (newProfile != null) {
+                        activeProfiles.put(uuid, newProfile);
+                        Bukkit.getScheduler().runTask(plugin, () -> {
+                            applyProfileToPlayer(player, newProfile);
+                        });
+                    }
+                });
+            }
+            return profiles;
         });
     }
 
-    public CompletableFuture<Void> saveAndUnloadPlayer(Player player) {
-        UUID pUuid = player.getUniqueId();
-        cancelSwitchTask(pUuid);
-        pendingChatInput.remove(pUuid);
-
-        Profile active = activeProfiles.get(pUuid);
-        if (active != null) {
-            captureProfileData(player, active);
-            active.setLastPlayed(System.currentTimeMillis());
-
-            // Clean permission attachment
-            PermissionAttachment attachment = perProfileAttachments.remove(pUuid);
-            if (attachment != null) {
-                player.removeAttachment(attachment);
-            }
-
-            activeProfiles.remove(pUuid);
-            return plugin.getStorage().saveProfile(active).thenRun(() -> loadedProfiles.remove(pUuid));
-        }
-
-        loadedProfiles.remove(pUuid);
-        return CompletableFuture.completedFuture(null);
-    }
-
+    /**
+     * Gets all loaded profiles for a player.
+     *
+     * @param playerUuid The player account UUID.
+     * @return List of profiles.
+     */
     public List<Profile> getPlayerProfiles(UUID playerUuid) {
-        return loadedProfiles.getOrDefault(playerUuid, Collections.emptyList());
+        return loadedProfiles.getOrDefault(playerUuid, new ArrayList<>());
     }
 
+    /**
+     * Gets the currently active profile for a player.
+     *
+     * @param playerUuid The player account UUID.
+     * @return The active Profile instance, or null if none loaded.
+     */
     public Profile getActiveProfile(UUID playerUuid) {
         return activeProfiles.get(playerUuid);
     }
 
+    /**
+     * Gets the maximum profile slots allowed for a player based on permissions and config.
+     *
+     * @param player The player instance.
+     * @return The maximum profile count integer.
+     */
     public int getMaxProfiles(Player player) {
         if (player.hasPermission("zenprofiles.max.unlimited") || player.isOp()) {
-            return 99;
+            return 27;
         }
 
         int max = plugin.getConfig().getInt("default-max-profiles", 3);
-        for (int i = 100; i >= 1; i--) {
+        for (int i = 27; i >= 1; i--) {
             if (player.hasPermission("zenprofiles.max." + i)) {
                 return i;
             }
@@ -113,253 +166,146 @@ public class ProfileManager {
         return max;
     }
 
-    public void tagCombat(UUID playerUuid) {
-        combatTimestamps.put(playerUuid, System.currentTimeMillis());
+    /**
+     * Asynchronously creates a new profile for a player.
+     *
+     * @param playerUuid The player account UUID.
+     * @param name The profile name.
+     * @return CompletableFuture completing with the created Profile object.
+     */
+    public CompletableFuture<Profile> createProfile(UUID playerUuid, String name) {
+        Profile profile = new Profile(UUID.randomUUID(), playerUuid, name);
+        List<Profile> list = loadedProfiles.computeIfAbsent(playerUuid, k -> new ArrayList<>());
+
+        Player player = Bukkit.getPlayer(playerUuid);
+        if (player != null) {
+            Location spawnLoc = getSpawnLocation();
+            if (spawnLoc != null) {
+                profile.getData().setLocation(spawnLoc);
+            }
+        }
+
+        list.add(profile);
+        return plugin.getStorage().saveProfile(profile).thenApply(v -> {
+            Bukkit.getPluginManager().callEvent(new ProfileCreateEvent(playerUuid, profile));
+            return profile;
+        });
     }
 
-    public boolean isInCombat(UUID playerUuid) {
-        if (!plugin.getConfig().getBoolean("profile-switching.combat-check.enabled", true)) {
-            return false;
-        }
-        Long lastCombat = combatTimestamps.get(playerUuid);
+    /**
+     * Asynchronously deletes a profile.
+     *
+     * @param playerUuid The player account UUID.
+     * @param profileId The profile UUID to delete.
+     * @return CompletableFuture completing with true if successful.
+     */
+    public CompletableFuture<Boolean> deleteProfile(UUID playerUuid, UUID profileId) {
+        List<Profile> list = loadedProfiles.get(playerUuid);
+        if (list == null) return CompletableFuture.completedFuture(false);
+
+        Profile toRemove = list.stream().filter(p -> p.getProfileId().equals(profileId)).findFirst().orElse(null);
+        if (toRemove == null) return CompletableFuture.completedFuture(false);
+
+        list.remove(toRemove);
+        return plugin.getStorage().deleteProfile(playerUuid, profileId).thenApply(v -> {
+            Bukkit.getPluginManager().callEvent(new ProfileDeleteEvent(playerUuid, toRemove));
+            return true;
+        });
+    }
+
+    /**
+     * Tags a player in combat to prevent immediate profile switching.
+     *
+     * @param player The player instance.
+     */
+    public void tagCombat(Player player) {
+        combatMap.put(player.getUniqueId(), System.currentTimeMillis());
+    }
+
+    /**
+     * Checks if a player is currently tagged in combat.
+     *
+     * @param player The player instance.
+     * @return true if in combat, false otherwise.
+     */
+    public boolean isInCombat(Player player) {
+        if (!plugin.getConfig().getBoolean("combat-check.enabled", true)) return false;
+        Long lastCombat = combatMap.get(player.getUniqueId());
         if (lastCombat == null) return false;
-        long durationMs = plugin.getConfig().getLong("profile-switching.combat-check.duration-seconds", 10) * 1000L;
+
+        long durationMs = plugin.getConfig().getLong("combat-check.duration-seconds", 10) * 1000L;
         return (System.currentTimeMillis() - lastCombat) < durationMs;
     }
 
-    public boolean validateProfileName(String name) {
-        if (name == null) return false;
-        String regex = plugin.getConfig().getString("profile-naming.regex", "^[a-zA-Z0-9_]{3,16}$");
-        if (!Pattern.matches(regex, name)) return false;
-
-        List<String> blacklist = plugin.getConfig().getStringList("profile-naming.blacklisted-names");
-        return !blacklist.contains(name.toLowerCase());
-    }
-
-    public String generateNextFruitName(UUID playerUuid) {
-        List<String> fruitNames = plugin.getConfig().getStringList("skyblock-fruit-names");
-        if (fruitNames == null || fruitNames.isEmpty()) {
-            fruitNames = Arrays.asList("Cucumber", "Fruit", "Kiwi", "Peach", "Mango", "Blueberry", "Zucchini", "Papaya", "Pineapple", "Coconut", "Lemon", "Lime");
-        }
-
-        List<Profile> existing = getPlayerProfiles(playerUuid);
-        for (String fruit : fruitNames) {
-            boolean used = false;
-            for (Profile p : existing) {
-                if (p.getName().equalsIgnoreCase(fruit)) {
-                    used = true;
-                    break;
-                }
-            }
-            if (!used) return fruit;
-        }
-
-        return "Profile_" + (existing.size() + 1);
-    }
-
-    public Location getSpawnLocation() {
-        if (plugin.getConfig().getBoolean("spawn.use-world-spawn", true)) {
-            World defaultWorld = Bukkit.getWorlds().isEmpty() ? null : Bukkit.getWorlds().get(0);
-            if (defaultWorld != null) {
-                return defaultWorld.getSpawnLocation();
-            }
-        }
-
-        String wName = plugin.getConfig().getString("spawn.custom-spawn.world", "world");
-        World world = Bukkit.getWorld(wName);
-        if (world == null && !Bukkit.getWorlds().isEmpty()) {
-            world = Bukkit.getWorlds().get(0);
-        }
-
-        if (world != null) {
-            double x = plugin.getConfig().getDouble("spawn.custom-spawn.x", 0.5);
-            double y = plugin.getConfig().getDouble("spawn.custom-spawn.y", 64.0);
-            double z = plugin.getConfig().getDouble("spawn.custom-spawn.z", 0.5);
-            float yaw = (float) plugin.getConfig().getDouble("spawn.custom-spawn.yaw", 0.0);
-            float pitch = (float) plugin.getConfig().getDouble("spawn.custom-spawn.pitch", 0.0);
-            return new Location(world, x, y, z, yaw, pitch);
-        }
-
-        return new Location(Bukkit.getWorlds().get(0), 0.5, 64, 0.5);
-    }
-
-    public void setSpawnLocation(Location loc) {
-        if (loc == null || loc.getWorld() == null) return;
-        plugin.getConfig().set("spawn.use-world-spawn", false);
-        plugin.getConfig().set("spawn.custom-spawn.world", loc.getWorld().getName());
-        plugin.getConfig().set("spawn.custom-spawn.x", loc.getX());
-        plugin.getConfig().set("spawn.custom-spawn.y", loc.getY());
-        plugin.getConfig().set("spawn.custom-spawn.z", loc.getZ());
-        plugin.getConfig().set("spawn.custom-spawn.yaw", (double) loc.getYaw());
-        plugin.getConfig().set("spawn.custom-spawn.pitch", (double) loc.getPitch());
-        plugin.saveConfig();
-    }
-
-    public Profile createProfileInstance(Player player, String name) {
-        Profile profile = new Profile(player.getUniqueId(), name);
-        ProfileData data = profile.getData();
-
-        Location spawn = getSpawnLocation();
-        if (spawn != null && spawn.getWorld() != null) {
-            data.setWorldName(spawn.getWorld().getName());
-            data.setX(spawn.getX());
-            data.setY(spawn.getY());
-            data.setZ(spawn.getZ());
-            data.setYaw(spawn.getYaw());
-            data.setPitch(spawn.getPitch());
-        }
-
-        return profile;
-    }
-
-    public Profile createProfile(Player player, String name) {
-        List<Profile> profiles = loadedProfiles.getOrDefault(player.getUniqueId(), new ArrayList<>());
-        if (profiles.size() >= getMaxProfiles(player)) {
-            player.sendMessage(MessageManager.parse(plugin.getMessageManager().getRawMessage("profile.limit-reached")
-                    .replace("{max}", String.valueOf(getMaxProfiles(player)))));
-            return null;
-        }
-
-        if (!validateProfileName(name)) {
-            player.sendMessage(plugin.getMessageManager().getComponent("profile.invalid-name"));
-            return null;
-        }
-
-        for (Profile p : profiles) {
-            if (p.getName().equalsIgnoreCase(name)) {
-                player.sendMessage(MessageManager.parse(plugin.getMessageManager().getRawMessage("profile.name-taken")
-                        .replace("{profile_name}", name)));
-                return null;
-            }
-        }
-
-        Profile newProfile = createProfileInstance(player, name);
-        profiles.add(newProfile);
-        loadedProfiles.put(player.getUniqueId(), profiles);
-        plugin.getStorage().saveProfile(newProfile);
-
-        Bukkit.getPluginManager().callEvent(new ProfileCreateEvent(player, newProfile));
-        player.sendMessage(MessageManager.parse(plugin.getMessageManager().getRawMessage("profile.created")
-                .replace("{profile_name}", name)));
-
-        // Automatically switch to the newly created profile!
-        initiateSwitch(player, newProfile);
-        return newProfile;
-    }
-
-    public void deleteProfile(Player player, Profile profile) {
-        Profile active = getActiveProfile(player.getUniqueId());
-        if (active != null && active.getProfileId().equals(profile.getProfileId())) {
-            player.sendMessage(plugin.getMessageManager().getComponent("profile.cannot-delete-active"));
-            return;
-        }
-
-        List<Profile> profiles = loadedProfiles.get(player.getUniqueId());
-        if (profiles != null) {
-            profiles.remove(profile);
-        }
-
-        plugin.getStorage().deleteProfile(profile.getProfileId());
-        Bukkit.getPluginManager().callEvent(new ProfileDeleteEvent(player, profile));
-        player.sendMessage(MessageManager.parse(plugin.getMessageManager().getRawMessage("profile.deleted")
-                .replace("{profile_name}", profile.getName())));
-    }
-
+    /**
+     * Initiates an asynchronous profile switch for a player.
+     *
+     * @param player The player switching profiles.
+     * @param targetProfile The profile to switch to.
+     */
     public void initiateSwitch(Player player, Profile targetProfile) {
-        Profile current = getActiveProfile(player.getUniqueId());
-        if (current != null && current.getProfileId().equals(targetProfile.getProfileId())) {
-            player.sendMessage(MessageManager.parse(plugin.getMessageManager().getRawMessage("profile.already-active")
-                    .replace("{profile_name}", targetProfile.getName())));
+        if (isInCombat(player)) {
+            player.sendMessage(plugin.getMessageManager().getMessage("in-combat"));
             return;
         }
 
-        if (isInCombat(player.getUniqueId())) {
-            player.sendMessage(plugin.getMessageManager().getComponent("switch.in-combat"));
+        Profile currentActive = getActiveProfile(player.getUniqueId());
+        if (currentActive != null && currentActive.getProfileId().equals(targetProfile.getProfileId())) {
+            player.sendMessage(plugin.getMessageManager().getMessage("already-active"));
             return;
         }
 
-        ProfilePreSwitchEvent preEvent = new ProfilePreSwitchEvent(player, current, targetProfile);
+        // Fire cancellable pre-switch event
+        ProfilePreSwitchEvent preEvent = new ProfilePreSwitchEvent(player, currentActive, targetProfile);
         Bukkit.getPluginManager().callEvent(preEvent);
         if (preEvent.isCancelled()) return;
 
-        int delay = plugin.getConfig().getInt("profile-switching.delay-seconds", 3);
-        if (delay <= 0 || player.hasPermission("zenprofiles.bypass.delay")) {
-            executeSwitch(player, current, targetProfile);
-            return;
-        }
-
-        cancelSwitchTask(player.getUniqueId());
-
-        player.sendMessage(MessageManager.parse(plugin.getMessageManager().getRawMessage("switch.countdown")
-                .replace("{profile_name}", targetProfile.getName())
-                .replace("{seconds}", String.valueOf(delay))));
-
-        Location startLoc = player.getLocation().clone();
-
-        BukkitTask task = new BukkitRunnable() {
-            int remaining = delay;
-
-            @Override
-            public void run() {
-                if (!player.isOnline()) {
-                    cancel();
-                    switchTasks.remove(player.getUniqueId());
-                    return;
+        int delaySeconds = plugin.getConfig().getInt("switch-delay-seconds", 0);
+        if (delaySeconds <= 0 || player.hasPermission("zenprofiles.admin")) {
+            executeSwitch(player, currentActive, targetProfile);
+        } else {
+            player.sendMessage(plugin.getMessageManager().getMessage("switch-delayed", "%seconds%", String.valueOf(delaySeconds)));
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                if (player.isOnline() && !isInCombat(player)) {
+                    executeSwitch(player, currentActive, targetProfile);
                 }
-
-                if (isInCombat(player.getUniqueId())) {
-                    player.sendMessage(plugin.getMessageManager().getComponent("switch.cancelled-combat"));
-                    cancel();
-                    switchTasks.remove(player.getUniqueId());
-                    return;
-                }
-
-                if (plugin.getConfig().getBoolean("profile-switching.cancel-on-move", true)) {
-                    if (startLoc.getWorld() != player.getWorld() || startLoc.distanceSquared(player.getLocation()) > 0.1) {
-                        player.sendMessage(plugin.getMessageManager().getComponent("switch.cancelled-move"));
-                        cancel();
-                        switchTasks.remove(player.getUniqueId());
-                        return;
-                    }
-                }
-
-                remaining--;
-                if (remaining <= 0) {
-                    cancel();
-                    switchTasks.remove(player.getUniqueId());
-                    executeSwitch(player, current, targetProfile);
-                }
-            }
-        }.runTaskTimer(plugin, 20L, 20L);
-
-        switchTasks.put(player.getUniqueId(), task);
-    }
-
-    public void cancelSwitchTask(UUID playerUuid) {
-        BukkitTask task = switchTasks.remove(playerUuid);
-        if (task != null) {
-            task.cancel();
+            }, delaySeconds * 20L);
         }
     }
 
-    private void executeSwitch(Player player, Profile previousProfile, Profile targetProfile) {
-        if (previousProfile != null) {
-            captureProfileData(player, previousProfile);
-            previousProfile.setLastPlayed(System.currentTimeMillis());
-            plugin.getStorage().saveProfile(previousProfile);
+    private void executeSwitch(Player player, Profile currentActive, Profile targetProfile) {
+        if (currentActive != null) {
+            saveCurrentPlayerToProfile(player, currentActive);
+            plugin.getStorage().saveProfile(currentActive);
         }
 
-        applyProfile(player, targetProfile);
+        activeProfiles.put(player.getUniqueId(), targetProfile);
 
-        Bukkit.getPluginManager().callEvent(new ProfileSwitchEvent(player, previousProfile, targetProfile));
-        player.sendMessage(MessageManager.parse(plugin.getMessageManager().getRawMessage("profile.selected")
-                .replace("{profile_name}", targetProfile.getName())));
+        // Apply profile data to player on Bukkit main thread
+        applyProfileToPlayer(player, targetProfile);
+
+        // Fire profile switch completion event
+        Bukkit.getPluginManager().callEvent(new ProfileSwitchEvent(player, currentActive, targetProfile));
+
+        // Update LuckPerms context
+        plugin.getLuckPermsHook().updateContext(player);
+
+        player.sendMessage(plugin.getMessageManager().getMessage("profile-switched", "%profile_name%", targetProfile.getName()));
+
+        // Save new profile state
+        plugin.getStorage().saveProfile(targetProfile);
     }
 
-    public void captureProfileData(Player player, Profile profile) {
+    /**
+     * Saves current player attributes, inventory, potion effects, and location into the active Profile object.
+     *
+     * @param player The player instance.
+     * @param profile The target Profile object.
+     */
+    public void saveCurrentPlayerToProfile(Player player, Profile profile) {
         ProfileData data = profile.getData();
-
         data.setHealth(player.getHealth());
+
         AttributeInstance maxHealthAttr = player.getAttribute(Attribute.GENERIC_MAX_HEALTH);
         if (maxHealthAttr != null) {
             data.setMaxHealth(maxHealthAttr.getBaseValue());
@@ -368,104 +314,159 @@ public class ProfileManager {
         data.setFoodLevel(player.getFoodLevel());
         data.setSaturation(player.getSaturation());
         data.setExhaustion(player.getExhaustion());
-        data.setLevel(player.getLevel());
-        data.setExp(player.getExp());
-        data.setGameMode(player.getGameMode().name());
+        data.setXpLevel(player.getLevel());
+        data.setXpProgress(player.getExp());
+        data.setGamemode(player.getGameMode().name());
 
-        Location loc = player.getLocation();
-        if (loc.getWorld() != null) {
-            data.setWorldName(loc.getWorld().getName());
-            data.setX(loc.getX());
-            data.setY(loc.getY());
-            data.setZ(loc.getZ());
-            data.setYaw(loc.getYaw());
-            data.setPitch(loc.getPitch());
-        }
+        data.setInventoryContents(serializeItemArray(player.getInventory().getContents()));
+        data.setArmorContents(serializeItemArray(player.getInventory().getArmorContents()));
+        data.setOffhandContent(serializeItemStack(player.getInventory().getItemInOffHand()));
+        data.setEnderChestContents(serializeItemArray(player.getEnderChest().getContents()));
 
         data.setPotionEffects(new ArrayList<>(player.getActivePotionEffects()));
-        data.setInventoryContents(player.getInventory().getStorageContents());
-        data.setArmorContents(player.getInventory().getArmorContents());
-        data.setOffHandItem(player.getInventory().getItemInOffHand());
-        data.setEnderChestContents(player.getEnderChest().getStorageContents());
+        data.setLocation(player.getLocation());
+
+        profile.setLastPlayed(System.currentTimeMillis());
     }
 
-    public void applyProfile(Player player, Profile profile) {
-        activeProfiles.put(player.getUniqueId(), profile);
+    /**
+     * Applies stored profile attributes, inventory, potion effects, and location to a player.
+     *
+     * @param player The player instance.
+     * @param profile The source Profile object.
+     */
+    public void applyProfileToPlayer(Player player, Profile profile) {
         ProfileData data = profile.getData();
 
-        // Max Health Attribute
+        // Clear active potion effects
+        for (PotionEffect effect : player.getActivePotionEffects()) {
+            player.removePotionEffect(effect.getType());
+        }
+
+        // Apply health attributes
         AttributeInstance maxHealthAttr = player.getAttribute(Attribute.GENERIC_MAX_HEALTH);
         if (maxHealthAttr != null) {
             maxHealthAttr.setBaseValue(data.getMaxHealth());
         }
-
-        double healthToSet = Math.min(data.getHealth(), data.getMaxHealth());
-        player.setHealth(Math.max(1.0, healthToSet));
+        player.setHealth(Math.min(data.getHealth(), data.getMaxHealth()));
 
         player.setFoodLevel(data.getFoodLevel());
         player.setSaturation(data.getSaturation());
         player.setExhaustion(data.getExhaustion());
-        player.setLevel(data.getLevel());
-        player.setExp(data.getExp());
+        player.setLevel(data.getXpLevel());
+        player.setExp(data.getXpProgress());
 
         try {
-            player.setGameMode(GameMode.valueOf(data.getGameMode()));
+            player.setGameMode(GameMode.valueOf(data.getGamemode()));
         } catch (Exception e) {
             player.setGameMode(GameMode.SURVIVAL);
         }
 
-        // Potion effects
-        for (PotionEffect effect : player.getActivePotionEffects()) {
-            player.removePotionEffect(effect.getType());
-        }
+        // Restore inventories
+        player.getInventory().setContents(deserializeItemArray(data.getInventoryContents()));
+        player.getInventory().setArmorContents(deserializeItemArray(data.getArmorContents()));
+        player.getInventory().setItemInOffHand(deserializeItemStack(data.getOffhandContent()));
+        player.getEnderChest().setContents(deserializeItemArray(data.getEnderChestContents()));
+
+        // Restore potion effects
         for (PotionEffect effect : data.getPotionEffects()) {
             player.addPotionEffect(effect);
         }
 
-        // Inventories
-        player.getInventory().clear();
-        if (data.getInventoryContents() != null) {
-            player.getInventory().setStorageContents(data.getInventoryContents());
-        }
-        if (data.getArmorContents() != null) {
-            player.getInventory().setArmorContents(data.getArmorContents());
-        }
-        if (data.getOffHandItem() != null) {
-            player.getInventory().setItemInOffHand(data.getOffHandItem());
-        }
-        player.getEnderChest().clear();
-        if (data.getEnderChestContents() != null) {
-            player.getEnderChest().setStorageContents(data.getEnderChestContents());
-        }
+        // Teleportation handling
+        Location targetLoc = data.getLocation();
+        Location spawnLoc = getSpawnLocation();
 
-        // Location & Spawn handling
-        boolean alwaysSpawn = plugin.getConfig().getBoolean("spawn.teleport-on-every-switch", false);
-        if (alwaysSpawn || data.getWorldName() == null) {
-            Location spawnLoc = getSpawnLocation();
-            if (spawnLoc != null) {
-                player.teleport(spawnLoc);
-            }
-        } else {
-            World w = Bukkit.getWorld(data.getWorldName());
-            if (w != null) {
-                player.teleport(new Location(w, data.getX(), data.getY(), data.getZ(), data.getYaw(), data.getPitch()));
-            } else {
-                Location spawnLoc = getSpawnLocation();
-                if (spawnLoc != null) player.teleport(spawnLoc);
-            }
-        }
-
-        // Apply custom per-profile permissions
-        PermissionAttachment oldAttachment = perProfileAttachments.remove(player.getUniqueId());
-        if (oldAttachment != null) {
-            player.removeAttachment(oldAttachment);
-        }
-        if (!data.getPerProfilePermissions().isEmpty()) {
-            PermissionAttachment newAttachment = player.addAttachment(plugin);
-            data.getPerProfilePermissions().forEach(newAttachment::setPermission);
-            perProfileAttachments.put(player.getUniqueId(), newAttachment);
+        if (plugin.getConfig().getBoolean("spawn.teleport-on-every-switch", false) && spawnLoc != null) {
+            player.teleport(spawnLoc);
+        } else if (targetLoc != null && targetLoc.getWorld() != null) {
+            player.teleport(targetLoc);
+        } else if (spawnLoc != null) {
+            player.teleport(spawnLoc);
         }
     }
 
-    public Set<UUID> getPendingChatInput() { return pendingChatInput; }
+    /**
+     * Gets the configured spawn location.
+     *
+     * @return Spawn Location object, or world spawn if set.
+     */
+    public Location getSpawnLocation() {
+        FileConfiguration config = plugin.getConfig();
+        if (config.getBoolean("spawn.use-custom-spawn", false)) {
+            String worldName = config.getString("spawn.custom-spawn.world", "world");
+            World world = Bukkit.getWorld(worldName);
+            if (world != null) {
+                double x = config.getDouble("spawn.custom-spawn.x", 0);
+                double y = config.getDouble("spawn.custom-spawn.y", 64);
+                double z = config.getDouble("spawn.custom-spawn.z", 0);
+                float yaw = (float) config.getDouble("spawn.custom-spawn.yaw", 0);
+                float pitch = (float) config.getDouble("spawn.custom-spawn.pitch", 0);
+                return new Location(world, x, y, z, yaw, pitch);
+            }
+        }
+        World mainWorld = Bukkit.getWorlds().get(0);
+        return mainWorld != null ? mainWorld.getSpawnLocation() : null;
+    }
+
+    /**
+     * Saves active profile and unloads player state on quit.
+     *
+     * @param player The player instance.
+     * @return CompletableFuture completing when save operations finish.
+     */
+    public CompletableFuture<Void> saveAndUnloadPlayer(Player player) {
+        UUID uuid = player.getUniqueId();
+        Profile active = activeProfiles.remove(uuid);
+        List<Profile> profiles = loadedProfiles.remove(uuid);
+        combatMap.remove(uuid);
+
+        if (active != null) {
+            saveCurrentPlayerToProfile(player, active);
+            return plugin.getStorage().saveProfile(active);
+        } else if (profiles != null && !profiles.isEmpty()) {
+            List<CompletableFuture<Void>> futures = new ArrayList<>();
+            for (Profile p : profiles) {
+                futures.add(plugin.getStorage().saveProfile(p));
+            }
+            return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+        }
+        return CompletableFuture.completedFuture(null);
+    }
+
+    // Helper methods for ItemStack serialization
+    private List<Map<String, Object>> serializeItemArray(ItemStack[] items) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        if (items == null) return list;
+        for (ItemStack item : items) {
+            if (item != null && !item.getType().isAir()) {
+                list.add(item.serialize());
+            } else {
+                list.add(new HashMap<>());
+            }
+        }
+        return list;
+    }
+
+    private ItemStack[] deserializeItemArray(List<Map<String, Object>> list) {
+        if (list == null || list.isEmpty()) return new ItemStack[0];
+        ItemStack[] items = new ItemStack[list.size()];
+        for (int i = 0; i < list.size(); i++) {
+            Map<String, Object> map = list.get(i);
+            if (map != null && !map.isEmpty()) {
+                items[i] = ItemStack.deserialize(map);
+            } else {
+                items[i] = null;
+            }
+        }
+        return items;
+    }
+
+    private Map<String, Object> serializeItemStack(ItemStack item) {
+        return (item != null && !item.getType().isAir()) ? item.serialize() : new HashMap<>();
+    }
+
+    private ItemStack deserializeItemStack(Map<String, Object> map) {
+        return (map != null && !map.isEmpty()) ? ItemStack.deserialize(map) : null;
+    }
 }

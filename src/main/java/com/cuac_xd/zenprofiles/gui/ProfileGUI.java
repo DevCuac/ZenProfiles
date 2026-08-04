@@ -1,179 +1,196 @@
 package com.cuac_xd.zenprofiles.gui;
 
 import com.cuac_xd.zenprofiles.ZenProfiles;
-import com.cuac_xd.zenprofiles.manager.MessageManager;
 import com.cuac_xd.zenprofiles.model.Profile;
-import net.kyori.adventure.text.Component;
+
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
-import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
-import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
-import java.text.SimpleDateFormat;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 
-public class ProfileGUI implements Listener, InventoryHolder {
+/**
+ * Hypixel Skyblock style profile management GUI.
+ * Renders emerald blocks for active profile, grass/dirt blocks for inactive profiles,
+ * dirt blocks for empty available slots (1-click creation), and bedrock for locked slots.
+ *
+ * @author cuac_xd
+ */
+public class ProfileGUI {
 
     private final ZenProfiles plugin;
-    private final Player player;
-    private Inventory inventory;
 
-    private final Map<Integer, Profile> slotProfileMap = new HashMap<>();
-    private final Set<Integer> emptySlotSet = new HashSet<>();
-    private int closeButtonSlot = 31;
-
-    public ProfileGUI(ZenProfiles plugin, Player player) {
+    public ProfileGUI(ZenProfiles plugin) {
         this.plugin = plugin;
-        this.player = player;
     }
 
-    public void open() {
-        YamlConfiguration config = plugin.getMenuManager().getMenuConfig("profile_selector");
-        if (config == null) return;
+    /**
+     * Opens the profile selector GUI for the target player.
+     *
+     * @param player The player opening the GUI.
+     */
+    public void open(Player player) {
+        FileConfiguration config = plugin.getMenuManager().getProfileSelectorConfig();
+        String titleText = config.getString("title", "<gradient:green:dark_green><bold>Profile Management</bold></gradient>");
+        int size = config.getInt("size", 54);
 
-        Component title = MessageManager.parse(config.getString("title", "<dark_gray>Profile Management</dark_gray>"));
-        int size = config.getInt("size", 36);
+        ZenHolder holder = new ZenHolder("profile_selector");
+        Inventory gui = Bukkit.createInventory(holder, size, plugin.getMessageManager().parse(titleText));
+        holder.setInventory(gui);
 
-        inventory = Bukkit.createInventory(this, size, title);
-
-        // Fill background
-        if (config.isConfigurationSection("fill-item")) {
-            Material fillMat = Material.matchMaterial(config.getString("fill-item.material", "GRAY_STAINED_GLASS_PANE"));
-            if (fillMat != null) {
-                ItemStack filler = new ItemStack(fillMat);
-                ItemMeta meta = filler.getItemMeta();
-                if (meta != null) {
-                    meta.displayName(MessageManager.parse(config.getString("fill-item.name", " ")));
-                    filler.setItemMeta(meta);
-                }
-                for (int i = 0; i < size; i++) {
-                    inventory.setItem(i, filler);
-                }
-            }
-        }
-
-        List<Integer> slots = config.getIntegerList("profile-slots");
-        if (slots.isEmpty()) slots = Arrays.asList(11, 12, 13, 14, 15);
-
-        List<Profile> profiles = plugin.getProfileManager().getPlayerProfiles(player.getUniqueId());
+        List<Profile> playerProfiles = plugin.getProfileManager().getPlayerProfiles(player.getUniqueId());
         Profile activeProfile = plugin.getProfileManager().getActiveProfile(player.getUniqueId());
         int maxProfiles = plugin.getProfileManager().getMaxProfiles(player);
-        SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy HH:mm");
 
-        for (int i = 0; i < slots.size(); i++) {
-            int slot = slots.get(i);
+        List<Integer> profileSlots = config.getIntegerList("profile-slots");
+        if (profileSlots.isEmpty()) {
+            profileSlots = List.of(10, 11, 12, 13, 14);
+        }
 
-            if (i < profiles.size()) {
-                // Profile exists
-                Profile p = profiles.get(i);
-                boolean isActive = activeProfile != null && activeProfile.getProfileId().equals(p.getProfileId());
-                String sectionKey = isActive ? "items.active-profile" : "items.inactive-profile";
+        // Fill decorative border elements
+        if (config.getBoolean("filler.enabled", true)) {
+            Material fillerMat = Material.matchMaterial(config.getString("filler.material", "GRAY_STAINED_GLASS_PANE"));
+            if (fillerMat == null) fillerMat = Material.GRAY_STAINED_GLASS_PANE;
 
-                Material mat = Material.matchMaterial(config.getString(sectionKey + ".material", isActive ? "EMERALD_BLOCK" : "GRASS_BLOCK"));
-                if (mat == null) mat = isActive ? Material.EMERALD_BLOCK : Material.GRASS_BLOCK;
+            ItemStack fillerItem = new ItemStack(fillerMat);
+            ItemMeta meta = fillerItem.getItemMeta();
+            if (meta != null) {
+                meta.displayName(plugin.getMessageManager().parse(" "));
+                fillerItem.setItemMeta(meta);
+            }
 
-                ItemStack item = new ItemStack(mat);
-                ItemMeta meta = item.getItemMeta();
-                if (meta != null) {
-                    String rawName = config.getString(sectionKey + ".name", "<yellow>Profile: <green>{profile_name}</green></yellow>");
-                    meta.displayName(MessageManager.parse(rawName.replace("{profile_name}", p.getName())));
-
-                    List<String> rawLore = config.getStringList(sectionKey + ".lore");
-                    List<Component> lore = new ArrayList<>();
-                    for (String line : rawLore) {
-                        String replaced = line.replace("{profile_id}", p.getProfileId().toString())
-                                .replace("{profile_name}", p.getName())
-                                .replace("{creation_date}", sdf.format(new Date(p.getCreatedAt())))
-                                .replace("{last_played}", sdf.format(new Date(p.getLastPlayed())))
-                                .replace("{balance}", String.format("%,.2f", p.getData().getBalance()));
-                        lore.add(MessageManager.parse(replaced));
-                    }
-                    meta.lore(lore);
-                    item.setItemMeta(meta);
+            for (int i = 0; i < size; i++) {
+                if (!profileSlots.contains(i)) {
+                    gui.setItem(i, fillerItem);
                 }
+            }
+        }
 
-                inventory.setItem(slot, item);
-                slotProfileMap.put(slot, p);
+        // Populate profile slots
+        for (int index = 0; index < profileSlots.size(); index++) {
+            int slot = profileSlots.get(index);
+            int slotIndex = index + 1;
 
-            } else if (i < maxProfiles) {
-                // Empty profile slot (Available for instant 1-click creation!)
-                Material mat = Material.matchMaterial(config.getString("items.empty-slot.material", "DIRT"));
-                if (mat == null) mat = Material.DIRT;
+            if (slotIndex <= playerProfiles.size()) {
+                // Existing Profile Slot
+                Profile profile = playerProfiles.get(index);
+                boolean isActive = activeProfile != null && activeProfile.getProfileId().equals(profile.getProfileId());
 
-                ItemStack item = new ItemStack(mat);
-                ItemMeta meta = item.getItemMeta();
-                if (meta != null) {
-                    meta.displayName(MessageManager.parse(config.getString("items.empty-slot.name", "<yellow>Empty Profile Slot</yellow>")));
-                    List<String> rawLore = config.getStringList("items.empty-slot.lore");
-                    List<Component> lore = new ArrayList<>();
-                    for (String line : rawLore) {
-                        lore.add(MessageManager.parse(line));
-                    }
-                    meta.lore(lore);
-                    item.setItemMeta(meta);
-                }
+                String nodePath = isActive ? "items.active-profile" : "items.inactive-profile";
+                ItemStack item = buildProfileItem(config, nodePath, profile, isActive, slotIndex);
+                gui.setItem(slot, item);
 
-                inventory.setItem(slot, item);
-                emptySlotSet.add(slot);
+            } else if (slotIndex <= maxProfiles) {
+                // Available Empty Profile Slot (1-Click Creation)
+                ItemStack item = buildEmptySlotItem(config, "items.empty-slot", slotIndex);
+                gui.setItem(slot, item);
 
             } else {
-                // Locked profile slot
-                Material mat = Material.matchMaterial(config.getString("items.locked-slot.material", "BEDROCK"));
-                if (mat == null) mat = Material.BEDROCK;
-
-                ItemStack item = new ItemStack(mat);
-                ItemMeta meta = item.getItemMeta();
-                if (meta != null) {
-                    meta.displayName(MessageManager.parse(config.getString("items.locked-slot.name", "<red>Locked profile slot</red>")));
-                    List<String> rawLore = config.getStringList("items.locked-slot.lore");
-                    List<Component> lore = new ArrayList<>();
-                    for (String line : rawLore) {
-                        lore.add(MessageManager.parse(line.replace("{slot_number}", String.valueOf(i + 1))));
-                    }
-                    meta.lore(lore);
-                    item.setItemMeta(meta);
-                }
-
-                inventory.setItem(slot, item);
+                // Locked Profile Slot (Requires Higher Permission)
+                ItemStack item = buildLockedSlotItem(config, "items.locked-slot", slotIndex);
+                gui.setItem(slot, item);
             }
         }
 
-        // Close Button
-        if (config.isConfigurationSection("close-button")) {
-            closeButtonSlot = config.getInt("close-button.slot", 31);
-            Material mat = Material.matchMaterial(config.getString("close-button.material", "BARRIER"));
-            if (mat != null) {
-                ItemStack btn = new ItemStack(mat);
-                ItemMeta meta = btn.getItemMeta();
-                if (meta != null) {
-                    meta.displayName(MessageManager.parse(config.getString("close-button.name", "<red><bold>Close</bold></red>")));
-                    List<Component> lore = new ArrayList<>();
-                    for (String line : config.getStringList("close-button.lore")) {
-                        lore.add(MessageManager.parse(line));
-                    }
-                    meta.lore(lore);
-                    btn.setItemMeta(meta);
-                }
-                inventory.setItem(closeButtonSlot, btn);
-            }
+        player.openInventory(gui);
+    }
+
+    private ItemStack buildProfileItem(FileConfiguration config, String path, Profile profile, boolean isActive, int slotIndex) {
+        String defaultMatName = isActive ? "EMERALD_BLOCK" : "GRASS_BLOCK";
+        Material mat = Material.matchMaterial(config.getString(path + ".material", defaultMatName));
+        if (mat == null) mat = Material.GRASS_BLOCK;
+
+        ItemStack item = new ItemStack(mat);
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) return item;
+
+        String name = config.getString(path + ".name", "<green>Profile: " + profile.getName());
+        name = name.replace("%profile_name%", profile.getName())
+                   .replace("%slot%", String.valueOf(slotIndex));
+        meta.displayName(plugin.getMessageManager().parse(name));
+
+        List<String> rawLore = config.getStringList(path + ".lore");
+        List<net.kyori.adventure.text.Component> formattedLore = new ArrayList<>();
+
+        for (String line : rawLore) {
+            line = line.replace("%profile_name%", profile.getName())
+                       .replace("%profile_id%", profile.getProfileId().toString())
+                       .replace("%created_at%", profile.getCreatedAtFormatted())
+                       .replace("%last_played%", profile.getLastPlayedFormatted())
+                       .replace("%coins%", plugin.getMessageManager().formatCoins(profile.getData().getBalance()))
+                       .replace("%slot%", String.valueOf(slotIndex));
+            formattedLore.add(plugin.getMessageManager().parse(line));
         }
 
-        player.openInventory(inventory);
+        meta.lore(formattedLore);
+        item.setItemMeta(meta);
+        return item;
     }
 
-    @Override
-    public Inventory getInventory() {
-        return inventory;
+    private ItemStack buildEmptySlotItem(FileConfiguration config, String path, int slotIndex) {
+        Material mat = Material.matchMaterial(config.getString(path + ".material", "DIRT"));
+        if (mat == null) mat = Material.DIRT;
+
+        ItemStack item = new ItemStack(mat);
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) return item;
+
+        String name = config.getString(path + ".name", "<gray>Empty Slot");
+        name = name.replace("%slot%", String.valueOf(slotIndex));
+        meta.displayName(plugin.getMessageManager().parse(name));
+
+        List<String> rawLore = config.getStringList(path + ".lore");
+        List<net.kyori.adventure.text.Component> formattedLore = new ArrayList<>();
+
+        for (String line : rawLore) {
+            line = line.replace("%slot%", String.valueOf(slotIndex));
+            formattedLore.add(plugin.getMessageManager().parse(line));
+        }
+
+        meta.lore(formattedLore);
+        item.setItemMeta(meta);
+        return item;
     }
 
+    private ItemStack buildLockedSlotItem(FileConfiguration config, String path, int slotIndex) {
+        Material mat = Material.matchMaterial(config.getString(path + ".material", "BEDROCK"));
+        if (mat == null) mat = Material.BEDROCK;
+
+        ItemStack item = new ItemStack(mat);
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) return item;
+
+        String name = config.getString(path + ".name", "<red>Locked Slot");
+        name = name.replace("%slot%", String.valueOf(slotIndex));
+        meta.displayName(plugin.getMessageManager().parse(name));
+
+        List<String> rawLore = config.getStringList(path + ".lore");
+        List<net.kyori.adventure.text.Component> formattedLore = new ArrayList<>();
+
+        for (String line : rawLore) {
+            line = line.replace("%slot%", String.valueOf(slotIndex));
+            formattedLore.add(plugin.getMessageManager().parse(line));
+        }
+
+        meta.lore(formattedLore);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    /**
+     * Listener class managing profile GUI interactions with anti-dupe security checks.
+     */
     public static class GUIListener implements Listener {
 
         private final ZenProfiles plugin;
@@ -182,39 +199,78 @@ public class ProfileGUI implements Listener, InventoryHolder {
             this.plugin = plugin;
         }
 
-        @EventHandler
+        @EventHandler(priority = EventPriority.HIGH)
         public void onInventoryClick(InventoryClickEvent event) {
-            if (!(event.getInventory().getHolder() instanceof ProfileGUI gui)) return;
+            if (!(event.getInventory().getHolder() instanceof ZenHolder holder)) return;
+            if (!"profile_selector".equals(holder.getMenuId())) return;
+
+            // Enforce strict cancellation to prevent item duplication or stealing
             event.setCancelled(true);
 
-            Player player = (Player) event.getWhoClicked();
-            int slot = event.getRawSlot();
+            if (!(event.getWhoClicked() instanceof Player player)) return;
+            if (event.getClickedInventory() != event.getInventory()) return;
 
-            if (slot == gui.closeButtonSlot) {
-                player.closeInventory();
-                return;
-            }
+            int clickedSlot = event.getSlot();
+            FileConfiguration config = plugin.getMenuManager().getProfileSelectorConfig();
+            List<Integer> profileSlots = config.getIntegerList("profile-slots");
+            if (profileSlots.isEmpty()) profileSlots = List.of(10, 11, 12, 13, 14);
 
-            // Clicked an available Empty Profile Slot -> Instant 1-click automatic creation!
-            if (gui.emptySlotSet.contains(slot)) {
-                player.closeInventory();
-                String autoFruitName = plugin.getProfileManager().generateNextFruitName(player.getUniqueId());
-                plugin.getProfileManager().createProfile(player, autoFruitName);
-                return;
-            }
+            if (!profileSlots.contains(clickedSlot)) return;
 
-            // Clicked an existing Profile
-            Profile clickedProfile = gui.slotProfileMap.get(slot);
-            if (clickedProfile != null) {
-                if (event.getClick() == ClickType.SHIFT_LEFT || event.getClick() == ClickType.SHIFT_RIGHT) {
-                    // Confirm Delete GUI
+            int slotIndex = profileSlots.indexOf(clickedSlot);
+            List<Profile> playerProfiles = plugin.getProfileManager().getPlayerProfiles(player.getUniqueId());
+            Profile activeProfile = plugin.getProfileManager().getActiveProfile(player.getUniqueId());
+            int maxProfiles = plugin.getProfileManager().getMaxProfiles(player);
+
+            if (slotIndex < playerProfiles.size()) {
+                // Clicked an existing profile slot
+                Profile targetProfile = playerProfiles.get(slotIndex);
+
+                if (event.isShiftClick()) {
+                    // Shift + Right Click to initiate deletion process
+                    if (activeProfile != null && activeProfile.getProfileId().equals(targetProfile.getProfileId())) {
+                        player.sendMessage(plugin.getMessageManager().getMessage("cannot-delete-active"));
+                        player.closeInventory();
+                        return;
+                    }
                     player.closeInventory();
-                    new ConfirmDeleteGUI(plugin, player, clickedProfile).open();
-                } else {
-                    // Select Profile
-                    player.closeInventory();
-                    plugin.getProfileManager().initiateSwitch(player, clickedProfile);
+                    new ConfirmDeleteGUI(plugin).open(player, targetProfile);
+                    return;
                 }
+
+                // Regular click to select profile
+                if (activeProfile != null && activeProfile.getProfileId().equals(targetProfile.getProfileId())) {
+                    player.sendMessage(plugin.getMessageManager().getMessage("already-active"));
+                    return;
+                }
+
+                player.closeInventory();
+                plugin.getProfileManager().initiateSwitch(player, targetProfile);
+
+            } else if (slotIndex < maxProfiles) {
+                // Clicked available empty profile slot -> Hypixel Skyblock 1-Click Auto Creation
+                player.closeInventory();
+
+                String autoFruitName = plugin.getProfileManager().generateNextFruitName(player.getUniqueId());
+                plugin.getProfileManager().createProfile(player.getUniqueId(), autoFruitName).thenAccept(newProfile -> {
+                    if (newProfile != null) {
+                        Bukkit.getScheduler().runTask(plugin, () -> {
+                            player.sendMessage(plugin.getMessageManager().getMessage("profile-created", "%profile_name%", newProfile.getName()));
+                            plugin.getProfileManager().initiateSwitch(player, newProfile);
+                        });
+                    }
+                });
+
+            } else {
+                // Clicked locked slot
+                player.sendMessage(plugin.getMessageManager().getMessage("max-profiles-reached"));
+            }
+        }
+
+        @EventHandler(priority = EventPriority.HIGH)
+        public void onInventoryDrag(InventoryDragEvent event) {
+            if (event.getInventory().getHolder() instanceof ZenHolder holder && "profile_selector".equals(holder.getMenuId())) {
+                event.setCancelled(true);
             }
         }
     }

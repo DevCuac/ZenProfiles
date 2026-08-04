@@ -1,115 +1,116 @@
 package com.cuac_xd.zenprofiles.gui;
 
 import com.cuac_xd.zenprofiles.ZenProfiles;
-import com.cuac_xd.zenprofiles.manager.MessageManager;
 import com.cuac_xd.zenprofiles.model.Profile;
-import net.kyori.adventure.text.Component;
+
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
-import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
-import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
-public class ConfirmDeleteGUI implements InventoryHolder {
+/**
+ * Confirmation GUI displayed when a player attempts to delete a profile.
+ * Features strict confirmation requirements to prevent accidental data loss.
+ *
+ * @author cuac_xd
+ */
+public class ConfirmDeleteGUI {
 
     private final ZenProfiles plugin;
-    private final Player player;
-    private final Profile profile;
-    private Inventory inventory;
+    private static final Map<UUID, Profile> targetProfiles = new HashMap<>();
 
-    private int confirmSlot = 11;
-    private int cancelSlot = 15;
-
-    public ConfirmDeleteGUI(ZenProfiles plugin, Player player, Profile profile) {
+    public ConfirmDeleteGUI(ZenProfiles plugin) {
         this.plugin = plugin;
-        this.player = player;
-        this.profile = profile;
     }
 
-    public void open() {
-        YamlConfiguration config = plugin.getMenuManager().getMenuConfig("confirm_delete");
-        if (config == null) return;
+    /**
+     * Opens the deletion confirmation GUI for a player targeting a specific profile.
+     *
+     * @param player The player deleting the profile.
+     * @param target The target profile to be deleted.
+     */
+    public void open(Player player, Profile target) {
+        targetProfiles.put(player.getUniqueId(), target);
 
-        String rawTitle = config.getString("title", "<dark_red>¿Eliminar {profile_name}?</dark_red>")
-                .replace("{profile_name}", profile.getName());
-        Component title = MessageManager.parse(rawTitle);
+        FileConfiguration config = plugin.getMenuManager().getConfirmDeleteConfig();
+        String titleText = config.getString("title", "<red><bold>Confirm Deletion</bold></red>");
         int size = config.getInt("size", 27);
 
-        inventory = Bukkit.createInventory(this, size, title);
+        ZenHolder holder = new ZenHolder("confirm_delete");
+        Inventory gui = Bukkit.createInventory(holder, size, plugin.getMessageManager().parse(titleText));
+        holder.setInventory(gui);
 
-        // Background
-        if (config.isConfigurationSection("fill-item")) {
-            Material fillMat = Material.matchMaterial(config.getString("fill-item.material", "RED_STAINED_GLASS_PANE"));
-            if (fillMat != null) {
-                ItemStack filler = new ItemStack(fillMat);
-                ItemMeta meta = filler.getItemMeta();
-                if (meta != null) {
-                    meta.displayName(MessageManager.parse(config.getString("fill-item.name", " ")));
-                    filler.setItemMeta(meta);
-                }
-                for (int i = 0; i < size; i++) {
-                    inventory.setItem(i, filler);
-                }
+        // Fill decorative elements
+        if (config.getBoolean("filler.enabled", true)) {
+            Material fillerMat = Material.matchMaterial(config.getString("filler.material", "GRAY_STAINED_GLASS_PANE"));
+            if (fillerMat == null) fillerMat = Material.GRAY_STAINED_GLASS_PANE;
+
+            ItemStack fillerItem = new ItemStack(fillerMat);
+            ItemMeta meta = fillerItem.getItemMeta();
+            if (meta != null) {
+                meta.displayName(plugin.getMessageManager().parse(" "));
+                fillerItem.setItemMeta(meta);
+            }
+
+            for (int i = 0; i < size; i++) {
+                gui.setItem(i, fillerItem);
             }
         }
 
-        // Confirm Button
-        if (config.isConfigurationSection("confirm-button")) {
-            confirmSlot = config.getInt("confirm-button.slot", 11);
-            Material mat = Material.matchMaterial(config.getString("confirm-button.material", "LIME_TERRACOTTA"));
-            if (mat != null) {
-                ItemStack btn = new ItemStack(mat);
-                ItemMeta meta = btn.getItemMeta();
-                if (meta != null) {
-                    meta.displayName(MessageManager.parse(config.getString("confirm-button.name", "<green><bold>¡CONFIRMAR ELIMINACIÓN!</bold></green>")));
-                    List<Component> lore = new ArrayList<>();
-                    for (String line : config.getStringList("confirm-button.lore")) {
-                        lore.add(MessageManager.parse(line.replace("{profile_name}", profile.getName())));
-                    }
-                    meta.lore(lore);
-                    btn.setItemMeta(meta);
-                }
-                inventory.setItem(confirmSlot, btn);
-            }
-        }
+        // Confirm Button (Red Stained Glass / Terracotta)
+        int confirmSlot = config.getInt("items.confirm.slot", 11);
+        gui.setItem(confirmSlot, buildButtonItem(config, "items.confirm", target, "RED_TERRACOTTA"));
 
-        // Cancel Button
-        if (config.isConfigurationSection("cancel-button")) {
-            cancelSlot = config.getInt("cancel-button.slot", 15);
-            Material mat = Material.matchMaterial(config.getString("cancel-button.material", "RED_TERRACOTTA"));
-            if (mat != null) {
-                ItemStack btn = new ItemStack(mat);
-                ItemMeta meta = btn.getItemMeta();
-                if (meta != null) {
-                    meta.displayName(MessageManager.parse(config.getString("cancel-button.name", "<red><bold>CANCELAR</bold></red>")));
-                    List<Component> lore = new ArrayList<>();
-                    for (String line : config.getStringList("cancel-button.lore")) {
-                        lore.add(MessageManager.parse(line.replace("{profile_name}", profile.getName())));
-                    }
-                    meta.lore(lore);
-                    btn.setItemMeta(meta);
-                }
-                inventory.setItem(cancelSlot, btn);
-            }
-        }
+        // Cancel Button (Green Stained Glass / Terracotta)
+        int cancelSlot = config.getInt("items.cancel.slot", 15);
+        gui.setItem(cancelSlot, buildButtonItem(config, "items.cancel", target, "GREEN_TERRACOTTA"));
 
-        player.openInventory(inventory);
+        player.openInventory(gui);
     }
 
-    @Override
-    public Inventory getInventory() {
-        return inventory;
+    private ItemStack buildButtonItem(FileConfiguration config, String path, Profile profile, String defaultMat) {
+        Material mat = Material.matchMaterial(config.getString(path + ".material", defaultMat));
+        if (mat == null) mat = Material.matchMaterial(defaultMat);
+        if (mat == null) mat = Material.STONE;
+
+        ItemStack item = new ItemStack(mat);
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) return item;
+
+        String name = config.getString(path + ".name", "");
+        name = name.replace("%profile_name%", profile.getName());
+        meta.displayName(plugin.getMessageManager().parse(name));
+
+        List<String> rawLore = config.getStringList(path + ".lore");
+        List<net.kyori.adventure.text.Component> formattedLore = new ArrayList<>();
+
+        for (String line : rawLore) {
+            line = line.replace("%profile_name%", profile.getName());
+            formattedLore.add(plugin.getMessageManager().parse(line));
+        }
+
+        meta.lore(formattedLore);
+        item.setItemMeta(meta);
+        return item;
     }
 
+    /**
+     * Listener class managing confirmation GUI interactions with anti-dupe security.
+     */
     public static class GUIListener implements Listener {
 
         private final ZenProfiles plugin;
@@ -118,20 +119,52 @@ public class ConfirmDeleteGUI implements InventoryHolder {
             this.plugin = plugin;
         }
 
-        @EventHandler
+        @EventHandler(priority = EventPriority.HIGH)
         public void onInventoryClick(InventoryClickEvent event) {
-            if (!(event.getInventory().getHolder() instanceof ConfirmDeleteGUI gui)) return;
+            if (!(event.getInventory().getHolder() instanceof ZenHolder holder)) return;
+            if (!"confirm_delete".equals(holder.getMenuId())) return;
+
             event.setCancelled(true);
 
-            Player player = (Player) event.getWhoClicked();
-            int slot = event.getRawSlot();
+            if (!(event.getWhoClicked() instanceof Player player)) return;
+            if (event.getClickedInventory() != event.getInventory()) return;
 
-            if (slot == gui.confirmSlot) {
+            Profile target = targetProfiles.get(player.getUniqueId());
+            if (target == null) {
                 player.closeInventory();
-                plugin.getProfileManager().deleteProfile(player, gui.profile);
-            } else if (slot == gui.cancelSlot) {
+                return;
+            }
+
+            FileConfiguration config = plugin.getMenuManager().getConfirmDeleteConfig();
+            int confirmSlot = config.getInt("items.confirm.slot", 11);
+            int cancelSlot = config.getInt("items.cancel.slot", 15);
+
+            if (event.getSlot() == confirmSlot) {
+                // Confirmed deletion
+                targetProfiles.remove(player.getUniqueId());
                 player.closeInventory();
-                new ProfileGUI(plugin, player).open();
+
+                plugin.getProfileManager().deleteProfile(player.getUniqueId(), target.getProfileId()).thenAccept(success -> {
+                    Bukkit.getScheduler().runTask(plugin, () -> {
+                        if (success) {
+                            player.sendMessage(plugin.getMessageManager().getMessage("profile-deleted", "%profile_name%", target.getName()));
+                        }
+                        new ProfileGUI(plugin).open(player);
+                    });
+                });
+
+            } else if (event.getSlot() == cancelSlot) {
+                // Cancelled deletion
+                targetProfiles.remove(player.getUniqueId());
+                player.closeInventory();
+                new ProfileGUI(plugin).open(player);
+            }
+        }
+
+        @EventHandler(priority = EventPriority.HIGH)
+        public void onInventoryDrag(InventoryDragEvent event) {
+            if (event.getInventory().getHolder() instanceof ZenHolder holder && "confirm_delete".equals(holder.getMenuId())) {
+                event.setCancelled(true);
             }
         }
     }

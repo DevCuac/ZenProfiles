@@ -3,31 +3,46 @@ package com.cuac_xd.zenprofiles.storage;
 import com.cuac_xd.zenprofiles.ZenProfiles;
 import com.cuac_xd.zenprofiles.model.Profile;
 import com.cuac_xd.zenprofiles.model.ProfileData;
-import org.bukkit.GameMode;
+
+import org.bukkit.Bukkit;
+import org.bukkit.Location;
+import org.bukkit.World;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
-import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
+/**
+ * YAML file storage engine implementation.
+ * Manages asynchronous reading and writing of profile data files stored under
+ * plugins/ZenProfiles/profiles/<player_uuid>/<profile_id>.yml.
+ *
+ * @author cuac_xd
+ */
 public class YamlStorage implements ProfileStorage {
 
     private final ZenProfiles plugin;
-    private final File baseFolder;
+    private final File profilesDir;
 
     public YamlStorage(ZenProfiles plugin) {
         this.plugin = plugin;
-        this.baseFolder = new File(plugin.getDataFolder(), "profiles");
+        this.profilesDir = new File(plugin.getDataFolder(), "profiles");
     }
 
     @Override
     public CompletableFuture<Void> init() {
         return CompletableFuture.runAsync(() -> {
-            if (!baseFolder.exists()) {
-                baseFolder.mkdirs();
+            if (!profilesDir.exists()) {
+                profilesDir.mkdirs();
             }
         });
     }
@@ -36,88 +51,27 @@ public class YamlStorage implements ProfileStorage {
     public CompletableFuture<List<Profile>> loadProfiles(UUID playerUuid) {
         return CompletableFuture.supplyAsync(() -> {
             List<Profile> profiles = new ArrayList<>();
-            File playerFolder = new File(baseFolder, playerUuid.toString());
-            if (!playerFolder.exists() || !playerFolder.isDirectory()) {
+            File userFolder = new File(profilesDir, playerUuid.toString());
+
+            if (!userFolder.exists() || !userFolder.isDirectory()) {
                 return profiles;
             }
 
-            File[] files = playerFolder.listFiles((dir, name) -> name.endsWith(".yml"));
+            File[] files = userFolder.listFiles((dir, name) -> name.endsWith(".yml"));
             if (files == null) return profiles;
 
             for (File file : files) {
                 try {
                     YamlConfiguration config = YamlConfiguration.loadConfiguration(file);
-                    UUID profileId = UUID.fromString(config.getString("profileId"));
+                    String idStr = config.getString("profileId");
                     String name = config.getString("name");
-                    long createdAt = config.getLong("createdAt");
-                    long lastPlayed = config.getLong("lastPlayed");
+                    long createdAt = config.getLong("createdAt", System.currentTimeMillis());
+                    long lastPlayed = config.getLong("lastPlayed", System.currentTimeMillis());
 
-                    ProfileData data = new ProfileData();
-                    data.setHealth(config.getDouble("data.health", 20.0));
-                    data.setMaxHealth(config.getDouble("data.maxHealth", 20.0));
-                    data.setFoodLevel(config.getInt("data.foodLevel", 20));
-                    data.setSaturation((float) config.getDouble("data.saturation", 5.0));
-                    data.setExhaustion((float) config.getDouble("data.exhaustion", 0.0));
-                    data.setLevel(config.getInt("data.level", 0));
-                    data.setExp((float) config.getDouble("data.exp", 0.0));
-                    data.setGameMode(config.getString("data.gameMode", GameMode.SURVIVAL.name()));
-                    data.setBalance(config.getDouble("data.balance", 0.0));
+                    if (idStr == null || name == null) continue;
+                    UUID profileId = UUID.fromString(idStr);
 
-                    data.setWorldName(config.getString("data.location.world"));
-                    data.setX(config.getDouble("data.location.x"));
-                    data.setY(config.getDouble("data.location.y"));
-                    data.setZ(config.getDouble("data.location.z"));
-                    data.setYaw((float) config.getDouble("data.location.yaw"));
-                    data.setPitch((float) config.getDouble("data.location.pitch"));
-
-                    // Custom PDC / Eco Data
-                    if (config.isConfigurationSection("data.pdc")) {
-                        Map<String, String> pdc = new HashMap<>();
-                        for (String key : config.getConfigurationSection("data.pdc").getKeys(false)) {
-                            pdc.put(key, config.getString("data.pdc." + key));
-                        }
-                        data.setCustomPdcData(pdc);
-                    }
-
-                    // Potion effects
-                    List<?> potionList = config.getList("data.potionEffects");
-                    if (potionList != null) {
-                        List<PotionEffect> effects = new ArrayList<>();
-                        for (Object obj : potionList) {
-                            if (obj instanceof PotionEffect effect) {
-                                effects.add(effect);
-                            }
-                        }
-                        data.setPotionEffects(effects);
-                    }
-
-                    // Inventories
-                    List<?> invList = config.getList("data.inventory");
-                    if (invList != null) {
-                        data.setInventoryContents(invList.toArray(new ItemStack[0]));
-                    }
-
-                    List<?> armorList = config.getList("data.armor");
-                    if (armorList != null) {
-                        data.setArmorContents(armorList.toArray(new ItemStack[0]));
-                    }
-
-                    data.setOffHandItem(config.getItemStack("data.offhand"));
-
-                    List<?> enderList = config.getList("data.enderchest");
-                    if (enderList != null) {
-                        data.setEnderChestContents(enderList.toArray(new ItemStack[0]));
-                    }
-
-                    // Custom per-profile permissions
-                    if (config.isConfigurationSection("data.permissions")) {
-                        Map<String, Boolean> perms = new HashMap<>();
-                        for (String key : config.getConfigurationSection("data.permissions").getKeys(false)) {
-                            perms.put(key, config.getBoolean("data.permissions." + key));
-                        }
-                        data.setPerProfilePermissions(perms);
-                    }
-
+                    ProfileData data = deserializeData(config.getConfigurationSection("data"));
                     Profile profile = new Profile(profileId, playerUuid, name, createdAt, lastPlayed, data);
                     profiles.add(profile);
 
@@ -125,9 +79,6 @@ public class YamlStorage implements ProfileStorage {
                     plugin.getLogger().warning("Failed to load profile file: " + file.getName() + " - " + e.getMessage());
                 }
             }
-
-            // Sort profiles by last played descending
-            profiles.sort((a, b) -> Long.compare(b.getLastPlayed(), a.getLastPlayed()));
             return profiles;
         });
     }
@@ -135,12 +86,10 @@ public class YamlStorage implements ProfileStorage {
     @Override
     public CompletableFuture<Void> saveProfile(Profile profile) {
         return CompletableFuture.runAsync(() -> {
-            File playerFolder = new File(baseFolder, profile.getPlayerUuid().toString());
-            if (!playerFolder.exists()) {
-                playerFolder.mkdirs();
-            }
+            File userFolder = new File(profilesDir, profile.getPlayerUuid().toString());
+            if (!userFolder.exists()) userFolder.mkdirs();
 
-            File file = new File(playerFolder, profile.getProfileId().toString() + ".yml");
+            File file = new File(userFolder, profile.getProfileId().toString() + ".yml");
             YamlConfiguration config = new YamlConfiguration();
 
             config.set("profileId", profile.getProfileId().toString());
@@ -149,58 +98,25 @@ public class YamlStorage implements ProfileStorage {
             config.set("createdAt", profile.getCreatedAt());
             config.set("lastPlayed", profile.getLastPlayed());
 
-            ProfileData data = profile.getData();
-            config.set("data.health", data.getHealth());
-            config.set("data.maxHealth", data.getMaxHealth());
-            config.set("data.foodLevel", data.getFoodLevel());
-            config.set("data.saturation", data.getSaturation());
-            config.set("data.exhaustion", data.getExhaustion());
-            config.set("data.level", data.getLevel());
-            config.set("data.exp", data.getExp());
-            config.set("data.gameMode", data.getGameMode());
-            config.set("data.balance", data.getBalance());
-
-            config.set("data.location.world", data.getWorldName());
-            config.set("data.location.x", data.getX());
-            config.set("data.location.y", data.getY());
-            config.set("data.location.z", data.getZ());
-            config.set("data.location.yaw", data.getYaw());
-            config.set("data.location.pitch", data.getPitch());
-
-            for (Map.Entry<String, String> entry : data.getCustomPdcData().entrySet()) {
-                config.set("data.pdc." + entry.getKey(), entry.getValue());
-            }
-
-            config.set("data.potionEffects", data.getPotionEffects());
-            config.set("data.inventory", data.getInventoryContents());
-            config.set("data.armor", data.getArmorContents());
-            config.set("data.offhand", data.getOffHandItem());
-            config.set("data.enderchest", data.getEnderChestContents());
-
-            for (Map.Entry<String, Boolean> entry : data.getPerProfilePermissions().entrySet()) {
-                config.set("data.permissions." + entry.getKey(), entry.getValue());
-            }
+            serializeData(config.createSection("data"), profile.getData());
 
             try {
                 config.save(file);
             } catch (IOException e) {
-                plugin.getLogger().severe("Could not save profile " + profile.getProfileId() + ": " + e.getMessage());
+                plugin.getLogger().severe("Failed to save profile " + profile.getName() + ": " + e.getMessage());
             }
         });
     }
 
     @Override
-    public CompletableFuture<Void> deleteProfile(UUID profileId) {
+    public CompletableFuture<Void> deleteProfile(UUID playerUuid, UUID profileId) {
         return CompletableFuture.runAsync(() -> {
-            File[] playerFolders = baseFolder.listFiles(File::isDirectory);
-            if (playerFolders != null) {
-                for (File pFolder : playerFolders) {
-                    File target = new File(pFolder, profileId.toString() + ".yml");
-                    if (target.exists()) {
-                        target.delete();
-                        break;
-                    }
-                }
+            File userFolder = new File(profilesDir, playerUuid.toString());
+            if (!userFolder.exists()) return;
+
+            File file = new File(userFolder, profileId.toString() + ".yml");
+            if (file.exists()) {
+                file.delete();
             }
         });
     }
@@ -208,5 +124,120 @@ public class YamlStorage implements ProfileStorage {
     @Override
     public CompletableFuture<Void> close() {
         return CompletableFuture.completedFuture(null);
+    }
+
+    private void serializeData(ConfigurationSection section, ProfileData data) {
+        section.set("health", data.getHealth());
+        section.set("maxHealth", data.getMaxHealth());
+        section.set("foodLevel", data.getFoodLevel());
+        section.set("saturation", data.getSaturation());
+        section.set("exhaustion", data.getExhaustion());
+        section.set("xpLevel", data.getXpLevel());
+        section.set("xpProgress", data.getXpProgress());
+        section.set("gamemode", data.getGamemode());
+        section.set("balance", data.getBalance());
+
+        section.set("inventory", data.getInventoryContents());
+        section.set("armor", data.getArmorContents());
+        section.set("offhand", data.getOffhandContent());
+        section.set("enderChest", data.getEnderChestContents());
+
+        // Serialize potion effects
+        List<Map<String, Object>> potionList = new ArrayList<>();
+        for (PotionEffect effect : data.getPotionEffects()) {
+            Map<String, Object> map = new HashMap<>();
+            map.put("type", effect.getType().getName());
+            map.put("duration", effect.getDuration());
+            map.put("amplifier", effect.getAmplifier());
+            map.put("ambient", effect.isAmbient());
+            map.put("particles", effect.hasParticles());
+
+            potionList.add(map);
+        }
+        section.set("potionEffects", potionList);
+
+        // Serialize location
+        if (data.getLocation() != null && data.getLocation().getWorld() != null) {
+            ConfigurationSection locSection = section.createSection("location");
+            locSection.set("world", data.getLocation().getWorld().getName());
+            locSection.set("x", data.getLocation().getX());
+            locSection.set("y", data.getLocation().getY());
+            locSection.set("z", data.getLocation().getZ());
+            locSection.set("yaw", data.getLocation().getYaw());
+            locSection.set("pitch", data.getLocation().getPitch());
+        }
+
+        // Serialize custom PDC data
+        section.set("pdc", data.getCustomPdcData());
+    }
+
+    @SuppressWarnings("unchecked")
+    private ProfileData deserializeData(ConfigurationSection section) {
+        ProfileData data = new ProfileData();
+        if (section == null) return data;
+
+        data.setHealth(section.getDouble("health", 20.0));
+        data.setMaxHealth(section.getDouble("maxHealth", 20.0));
+        data.setFoodLevel(section.getInt("foodLevel", 20));
+        data.setSaturation((float) section.getDouble("saturation", 5.0));
+        data.setExhaustion((float) section.getDouble("exhaustion", 0.0));
+        data.setXpLevel(section.getInt("xpLevel", 0));
+        data.setXpProgress((float) section.getDouble("xpProgress", 0.0));
+        data.setGamemode(section.getString("gamemode", "SURVIVAL"));
+        data.setBalance(section.getDouble("balance", 0.0));
+
+        data.setInventoryContents((List<Map<String, Object>>) section.get("inventory"));
+        data.setArmorContents((List<Map<String, Object>>) section.get("armor"));
+        data.setOffhandContent((Map<String, Object>) section.get("offhand"));
+        data.setEnderChestContents((List<Map<String, Object>>) section.get("enderChest"));
+
+        // Deserialize potion effects
+        List<PotionEffect> potions = new ArrayList<>();
+        List<Map<?, ?>> rawPotions = section.getMapList("potionEffects");
+        for (Map<?, ?> map : rawPotions) {
+            try {
+                String typeName = (String) map.get("type");
+                int duration = (int) map.get("duration");
+                int amplifier = (int) map.get("amplifier");
+                boolean ambient = map.containsKey("ambient") && (boolean) map.get("ambient");
+                boolean particles = !map.containsKey("particles") || (boolean) map.get("particles");
+
+                PotionEffectType type = PotionEffectType.getByName(typeName);
+                if (type != null) {
+                    potions.add(new PotionEffect(type, duration, amplifier, ambient, particles));
+                }
+            } catch (Exception ignored) {}
+        }
+        data.setPotionEffects(potions);
+
+        // Deserialize location
+        ConfigurationSection locSection = section.getConfigurationSection("location");
+        if (locSection != null) {
+            String worldName = locSection.getString("world");
+            if (worldName != null) {
+                World world = Bukkit.getWorld(worldName);
+                double x = locSection.getDouble("x");
+                double y = locSection.getDouble("y");
+                double z = locSection.getDouble("z");
+                float yaw = (float) locSection.getDouble("yaw");
+                float pitch = (float) locSection.getDouble("pitch");
+
+                if (world != null) {
+                    data.setLocation(new Location(world, x, y, z, yaw, pitch));
+                }
+            }
+        }
+
+        // Deserialize custom PDC data
+        ConfigurationSection pdcSec = section.getConfigurationSection("pdc");
+        if (pdcSec != null) {
+            Map<String, String> pdcMap = new HashMap<>();
+            for (String key : pdcSec.getKeys(false)) {
+                pdcMap.put(key, pdcSec.getString(key));
+            }
+            data.setCustomPdcData(pdcMap);
+        }
+
+        return data;
     }
 }

@@ -1,49 +1,54 @@
 package com.cuac_xd.zenprofiles.manager;
 
 import com.cuac_xd.zenprofiles.ZenProfiles;
+import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 
 import java.io.File;
-import java.util.HashMap;
-import java.util.Map;
 
+/**
+ * Menu configuration loader manager.
+ * Loads and manages YAML configurations for profile_selector.yml, confirm_delete.yml,
+ * and create_profile.yml GUI layouts.
+ *
+ * @author cuac_xd
+ */
 public class MenuManager {
 
     private final ZenProfiles plugin;
-    private final Map<String, YamlConfiguration> menuConfigs = new HashMap<>();
+
+    private FileConfiguration profileSelectorConfig;
+    private FileConfiguration confirmDeleteConfig;
+    private FileConfiguration createProfileConfig;
 
     public MenuManager(ZenProfiles plugin) {
         this.plugin = plugin;
-        reload();
+        loadMenuConfigs();
     }
 
-    public void reload() {
-        menuConfigs.clear();
-        File folder = new File(plugin.getDataFolder(), "menus");
-        if (!folder.exists()) {
-            folder.mkdirs();
+    /**
+     * Loads all GUI menu configuration files from the menus/ subdirectory.
+     */
+    public void loadMenuConfigs() {
+        File menusDir = new File(plugin.getDataFolder(), "menus");
+        if (!menusDir.exists()) {
+            menusDir.mkdirs();
         }
 
-        saveDefaultMenu("profile_selector.yml");
-        saveDefaultMenu("confirm_delete.yml");
+        profileSelectorConfig = loadOrSaveResource(menusDir, "profile_selector.yml");
+        confirmDeleteConfig = loadOrSaveResource(menusDir, "confirm_delete.yml");
+        createProfileConfig = loadOrSaveResource(menusDir, "create_profile.yml");
+    }
 
-        File[] files = folder.listFiles((dir, name) -> name.endsWith(".yml"));
-        if (files != null) {
-            for (File file : files) {
-                String menuName = file.getName().replace(".yml", "");
-                menuConfigs.put(menuName, YamlConfiguration.loadConfiguration(file));
-            }
+    private FileConfiguration loadOrSaveResource(File dir, String filename) {
+        File file = new File(dir, filename);
+        if (!file.exists()) {
+            plugin.saveResource("menus/" + filename, false);
         }
+        return YamlConfiguration.loadConfiguration(file);
     }
 
-    private void saveDefaultMenu(String fileName) {
-        File target = new File(new File(plugin.getDataFolder(), "menus"), fileName);
-        if (!target.exists()) {
-            plugin.saveResource("menus/" + fileName, false);
-        }
-    }
-
-    public YamlConfiguration getMenuConfig(String name) {
-        return menuConfigs.get(name);
-    }
+    public FileConfiguration getProfileSelectorConfig() { return profileSelectorConfig; }
+    public FileConfiguration getConfirmDeleteConfig() { return confirmDeleteConfig; }
+    public FileConfiguration getCreateProfileConfig() { return createProfileConfig; }
 }

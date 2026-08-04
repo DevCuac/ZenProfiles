@@ -6,9 +6,16 @@ import org.bukkit.event.Event;
 import org.bukkit.event.HandlerList;
 import org.jetbrains.annotations.NotNull;
 
+/**
+ * Event fired after a player completes a profile switch.
+ * Notifies third-party plugins to flush previous profile cache and load target profile data.
+ *
+ * @author cuac_xd
+ */
 public class ProfileSwitchEvent extends Event {
 
     private static final HandlerList HANDLERS = new HandlerList();
+
     private final Player player;
     private final Profile previousProfile;
     private final Profile newProfile;
@@ -23,9 +30,7 @@ public class ProfileSwitchEvent extends Event {
     public Profile getPreviousProfile() { return previousProfile; }
     public Profile getNewProfile() { return newProfile; }
 
-    @NotNull
     @Override
-    public HandlerList getHandlers() { return HANDLERS; }
-
+    public @NotNull HandlerList getHandlers() { return HANDLERS; }
     public static HandlerList getHandlerList() { return HANDLERS; }
 }

@@ -1,157 +1,102 @@
 package com.cuac_xd.zenprofiles.gui;
 
 import com.cuac_xd.zenprofiles.ZenProfiles;
-import com.cuac_xd.zenprofiles.manager.MessageManager;
-import com.cuac_xd.zenprofiles.model.Profile;
-import net.kyori.adventure.text.Component;
+
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
-import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
-import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
-import java.util.HashMap;
 
-public class CreateProfileGUI implements InventoryHolder {
+/**
+ * Auxiliary profile creation menu GUI.
+ * Allows 1-click automatic profile creation with pre-configured fruit names.
+ *
+ * @author cuac_xd
+ */
+public class CreateProfileGUI {
 
     private final ZenProfiles plugin;
-    private final Player player;
-    private Inventory inventory;
 
-    private final Map<Integer, String> slotFruitMap = new HashMap<>();
-    private int customNameSlot = 31;
-    private int backSlot = 35;
-
-    public CreateProfileGUI(ZenProfiles plugin, Player player) {
+    public CreateProfileGUI(ZenProfiles plugin) {
         this.plugin = plugin;
-        this.player = player;
     }
 
-    public void open() {
-        YamlConfiguration config = plugin.getMenuManager().getMenuConfig("create_profile");
-        if (config == null) return;
+    /**
+     * Opens the creation menu for a player.
+     *
+     * @param player The target player.
+     */
+    public void open(Player player) {
+        FileConfiguration config = plugin.getMenuManager().getCreateProfileConfig();
+        String titleText = config.getString("title", "<gradient:green:dark_green><bold>Create New Profile</bold></gradient>");
+        int size = config.getInt("size", 27);
 
-        Component title = MessageManager.parse(config.getString("title", "<dark_gray>Crear Nuevo Perfil</dark_gray>"));
-        int size = config.getInt("size", 36);
+        ZenHolder holder = new ZenHolder("create_profile");
+        Inventory gui = Bukkit.createInventory(holder, size, plugin.getMessageManager().parse(titleText));
+        holder.setInventory(gui);
 
-        inventory = Bukkit.createInventory(this, size, title);
+        // Fill decorative border elements
+        if (config.getBoolean("filler.enabled", true)) {
+            Material fillerMat = Material.matchMaterial(config.getString("filler.material", "GRAY_STAINED_GLASS_PANE"));
+            if (fillerMat == null) fillerMat = Material.GRAY_STAINED_GLASS_PANE;
 
-        // Fill background
-        if (config.isConfigurationSection("fill-item")) {
-            Material fillMat = Material.matchMaterial(config.getString("fill-item.material", "GRAY_STAINED_GLASS_PANE"));
-            if (fillMat != null) {
-                ItemStack filler = new ItemStack(fillMat);
-                ItemMeta meta = filler.getItemMeta();
-                if (meta != null) {
-                    meta.displayName(MessageManager.parse(config.getString("fill-item.name", " ")));
-                    filler.setItemMeta(meta);
-                }
-                for (int i = 0; i < size; i++) {
-                    inventory.setItem(i, filler);
-                }
-            }
-        }
-
-        // Available Hypixel Skyblock Fruit Options
-        List<String> fruitNames = plugin.getConfig().getStringList("skyblock-fruit-names");
-        if (fruitNames.isEmpty()) {
-            fruitNames = Arrays.asList("Cucumber", "Fruit", "Kiwi", "Peach", "Mango", "Blueberry", "Zucchini", "Papaya");
-        }
-
-        List<Profile> existingProfiles = plugin.getProfileManager().getPlayerProfiles(player.getUniqueId());
-        List<String> availableFruits = new ArrayList<>();
-        for (String fruit : fruitNames) {
-            boolean taken = false;
-            for (Profile p : existingProfiles) {
-                if (p.getName().equalsIgnoreCase(fruit)) {
-                    taken = true;
-                    break;
-                }
-            }
-            if (!taken) {
-                availableFruits.add(fruit);
-            }
-        }
-
-        List<Integer> slots = config.getIntegerList("preset-slots");
-        if (slots.isEmpty()) slots = Arrays.asList(10, 11, 12, 13, 14, 15, 16);
-
-        for (int i = 0; i < Math.min(slots.size(), availableFruits.size()); i++) {
-            int slot = slots.get(i);
-            String fruitName = availableFruits.get(i);
-
-            ItemStack apple = new ItemStack(Material.APPLE);
-            ItemMeta meta = apple.getItemMeta();
+            ItemStack fillerItem = new ItemStack(fillerMat);
+            ItemMeta meta = fillerItem.getItemMeta();
             if (meta != null) {
-                meta.displayName(MessageManager.parse("<gradient:yellow:gold>Perfil " + fruitName + "</gradient>"));
-                List<Component> lore = new ArrayList<>();
-                lore.add(MessageManager.parse("<gray>Haz clic para crear instantáneamente</gray>"));
-                lore.add(MessageManager.parse("<gray>el perfil <yellow>" + fruitName + "</yellow>.</gray>"));
-                meta.lore(lore);
-                apple.setItemMeta(meta);
+                meta.displayName(plugin.getMessageManager().parse(" "));
+                fillerItem.setItemMeta(meta);
             }
-            inventory.setItem(slot, apple);
-            slotFruitMap.put(slot, fruitName);
-        }
 
-        // Custom Name Button
-        if (config.isConfigurationSection("custom-name-button")) {
-            customNameSlot = config.getInt("custom-name-button.slot", 31);
-            Material mat = Material.matchMaterial(config.getString("custom-name-button.material", "PAPER"));
-            if (mat != null) {
-                ItemStack btn = new ItemStack(mat);
-                ItemMeta meta = btn.getItemMeta();
-                if (meta != null) {
-                    meta.displayName(MessageManager.parse(config.getString("custom-name-button.name", "<yellow><bold>Nombre Personalizado</bold></yellow>")));
-                    List<Component> lore = new ArrayList<>();
-                    for (String line : config.getStringList("custom-name-button.lore")) {
-                        lore.add(MessageManager.parse(line));
-                    }
-                    meta.lore(lore);
-                    btn.setItemMeta(meta);
-                }
-                inventory.setItem(customNameSlot, btn);
+            for (int i = 0; i < size; i++) {
+                gui.setItem(i, fillerItem);
             }
         }
 
-        // Back Button
-        if (config.isConfigurationSection("back-button")) {
-            backSlot = config.getInt("back-button.slot", 35);
-            Material mat = Material.matchMaterial(config.getString("back-button.material", "ARROW"));
-            if (mat != null) {
-                ItemStack btn = new ItemStack(mat);
-                ItemMeta meta = btn.getItemMeta();
-                if (meta != null) {
-                    meta.displayName(MessageManager.parse(config.getString("back-button.name", "<red><bold>Volver</bold></red>")));
-                    List<Component> lore = new ArrayList<>();
-                    for (String line : config.getStringList("back-button.lore")) {
-                        lore.add(MessageManager.parse(line));
-                    }
-                    meta.lore(lore);
-                    btn.setItemMeta(meta);
-                }
-                inventory.setItem(backSlot, btn);
-            }
-        }
+        // Create Button
+        int createSlot = config.getInt("items.create.slot", 13);
+        gui.setItem(createSlot, buildButtonItem(config, "items.create", "LIME_TERRACOTTA"));
 
-        player.openInventory(inventory);
+        player.openInventory(gui);
     }
 
-    @Override
-    public Inventory getInventory() {
-        return inventory;
+    private ItemStack buildButtonItem(FileConfiguration config, String path, String defaultMat) {
+        Material mat = Material.matchMaterial(config.getString(path + ".material", defaultMat));
+        if (mat == null) mat = Material.matchMaterial(defaultMat);
+        if (mat == null) mat = Material.STONE;
+
+        ItemStack item = new ItemStack(mat);
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) return item;
+
+        String name = config.getString(path + ".name", "<green>Create Profile");
+        meta.displayName(plugin.getMessageManager().parse(name));
+
+        List<String> rawLore = config.getStringList(path + ".lore");
+        List<net.kyori.adventure.text.Component> formattedLore = new ArrayList<>();
+
+        for (String line : rawLore) {
+            formattedLore.add(plugin.getMessageManager().parse(line));
+        }
+
+        meta.lore(formattedLore);
+        item.setItemMeta(meta);
+        return item;
     }
 
+    /**
+     * Listener class managing creation GUI interactions with anti-dupe security.
+     */
     public static class GUIListener implements Listener {
 
         private final ZenProfiles plugin;
@@ -160,31 +105,38 @@ public class CreateProfileGUI implements InventoryHolder {
             this.plugin = plugin;
         }
 
-        @EventHandler
+        @EventHandler(priority = EventPriority.HIGH)
         public void onInventoryClick(InventoryClickEvent event) {
-            if (!(event.getInventory().getHolder() instanceof CreateProfileGUI gui)) return;
+            if (!(event.getInventory().getHolder() instanceof ZenHolder holder)) return;
+            if (!"create_profile".equals(holder.getMenuId())) return;
+
             event.setCancelled(true);
 
-            Player player = (Player) event.getWhoClicked();
-            int slot = event.getRawSlot();
+            if (!(event.getWhoClicked() instanceof Player player)) return;
+            if (event.getClickedInventory() != event.getInventory()) return;
 
-            if (slot == gui.backSlot) {
+            FileConfiguration config = plugin.getMenuManager().getCreateProfileConfig();
+            int createSlot = config.getInt("items.create.slot", 13);
+
+            if (event.getSlot() == createSlot) {
                 player.closeInventory();
-                new ProfileGUI(plugin, player).open();
-                return;
+
+                String autoFruitName = plugin.getProfileManager().generateNextFruitName(player.getUniqueId());
+                plugin.getProfileManager().createProfile(player.getUniqueId(), autoFruitName).thenAccept(newProfile -> {
+                    if (newProfile != null) {
+                        Bukkit.getScheduler().runTask(plugin, () -> {
+                            player.sendMessage(plugin.getMessageManager().getMessage("profile-created", "%profile_name%", newProfile.getName()));
+                            plugin.getProfileManager().initiateSwitch(player, newProfile);
+                        });
+                    }
+                });
             }
+        }
 
-            if (slot == gui.customNameSlot) {
-                player.closeInventory();
-                plugin.getProfileManager().getPendingChatInput().add(player.getUniqueId());
-                player.sendMessage(plugin.getMessageManager().getComponent("profile.type-name-prompt"));
-                return;
-            }
-
-            String fruitName = gui.slotFruitMap.get(slot);
-            if (fruitName != null) {
-                player.closeInventory();
-                plugin.getProfileManager().createProfile(player, fruitName);
+        @EventHandler(priority = EventPriority.HIGH)
+        public void onInventoryDrag(InventoryDragEvent event) {
+            if (event.getInventory().getHolder() instanceof ZenHolder holder && "create_profile".equals(holder.getMenuId())) {
+                event.setCancelled(true);
             }
         }
     }
