@@ -1,18 +1,18 @@
-# Guía de Implementación de ZenProfiles para la Suite de Plugins ZEN
+# ZenProfiles Integration Guide for the ZEN Plugins Suite
 
-Esta documentación detalla los estándares de integración y patrones de código para que todos los plugins de la suite **ZEN** (`ZenBank`, `ZenSacks`, `ZenFairy`, `ZenRankups`, `ZenQuests`, `ZenMilestones`, `ZenRewards`, `ZenCosmetics`, `ZenBoosters`, `ZenDungeons`, `ZenForges`, `ZenDuels`, `ZenPvPCore`) soporten automáticamente el sistema de perfiles independientes de **ZenProfiles**.
+This documentation details the integration standards, code patterns, and best practices for all plugins in the **ZEN** suite (`ZenBank`, `ZenSacks`, `ZenFairy`, `ZenRankups`, `ZenQuests`, `ZenMilestones`, `ZenRewards`, `ZenCosmetics`, `ZenBoosters`, `ZenDungeons`, `ZenForges`, `ZenDuels`, `ZenPvPCore`) to natively support **ZenProfiles** per-profile data isolation.
 
 ---
 
-## 1. Configuración de Dependencias
+## 1. Dependency Configuration
 
-En cada uno de tus plugins de la suite ZEN, añade **`ZenProfiles`** como dependencia suave (`softdepend`) en el archivo `plugin.yml`:
+In each plugin within the ZEN suite, declare **`ZenProfiles`** as a soft dependency in `plugin.yml`:
 
 ```yaml
 softdepend: [ZenProfiles]
 ```
 
-En tu `pom.xml` (o dependencia local del proyecto):
+In your `pom.xml` (or local dependency manifest):
 
 ```xml
 <dependency>
@@ -25,11 +25,11 @@ En tu `pom.xml` (o dependencia local del proyecto):
 
 ---
 
-## 2. Patrón de Obtención de UUID de Perfil
+## 2. Profile UUID Retrieval Pattern
 
-Dado que todas las APIs de la suite ZEN aceptan una `UUID` como clave primaria de almacenamiento (base de datos SQLite/MySQL o caché en RAM), basta con obtener la `UUID` del perfil activo usando **`ZenProfilesAPI.getActiveProfileUUID(...)`**:
+Since all ZEN suite APIs accept a `UUID` as their primary storage key (MySQL/SQLite or in-memory RAM cache), simply retrieve the active profile's `UUID` using **`ZenProfilesAPI.getActiveProfileUUID(...)`**:
 
-### Método Helper Recomendado (Para incluir en cada plugin ZEN)
+### Recommended Helper Class (Include in each ZEN plugin)
 
 ```java
 import com.cuac_xd.zenprofiles.api.ZenProfilesAPI;
@@ -41,9 +41,9 @@ import java.util.UUID;
 public class ProfileUtil {
 
     /**
-     * Obtiene la UUID adecuada para almacenar datos:
-     * Si ZenProfiles está activo, devuelve la UUID del perfil activo del jugador.
-     * De lo contrario, devuelve la UUID de la cuenta de Minecraft.
+     * Resolves the target UUID for data storage:
+     * Returns the active profile UUID if ZenProfiles is enabled;
+     * otherwise falls back to the player's account UUID.
      */
     public static UUID getTargetUUID(Player player) {
         if (player == null) return null;
@@ -54,7 +54,7 @@ public class ProfileUtil {
     }
 
     /**
-     * Versión para UUID de jugador online.
+     * Overload for online player UUID resolution.
      */
     public static UUID getTargetUUID(UUID playerUuid) {
         if (playerUuid == null) return null;
@@ -68,11 +68,11 @@ public class ProfileUtil {
 
 ---
 
-## 3. Escuchar Eventos de Perfil (`ProfileSwitchEvent`)
+## 3. Handling Profile Switch Events (`ProfileSwitchEvent`)
 
-Cuando un jugador cambia de perfil mediante el comando o la GUI de **ZenProfiles**, se dispara el evento `ProfileSwitchEvent`. Cada plugin de la suite ZEN debe escuchar este evento para **guardar y descargar la caché del perfil anterior** y **cargar la data del nuevo perfil**.
+When a player switches profiles via `/profile` command or GUI, **ZenProfiles** fires `ProfileSwitchEvent`. Each ZEN suite plugin should listen to this event to **save and unload the cache for the previous profile** and **load the target profile's data**.
 
-### Ejemplo de Listener en tus Plugins ZEN
+### Example Event Listener
 
 ```java
 package com.cuac_xd.zenplugin.listeners;
@@ -88,9 +88,9 @@ import java.util.UUID;
 
 public class ProfileSwitchListener implements Listener {
 
-    private final MiZenPlugin plugin;
+    private final MyZenPlugin plugin;
 
-    public ProfileSwitchListener(MiZenPlugin plugin) {
+    public ProfileSwitchListener(MyZenPlugin plugin) {
         this.plugin = plugin;
     }
 
@@ -100,13 +100,13 @@ public class ProfileSwitchListener implements Listener {
         Profile oldProfile = event.getPreviousProfile();
         Profile newProfile = event.getNewProfile();
 
-        // 1. Guardar y vaciar datos en caché del perfil anterior
+        // 1. Flush and unload in-memory cache for previous profile
         if (oldProfile != null) {
             UUID oldProfileId = oldProfile.getProfileId();
             plugin.getDataManager().saveAndUnloadCache(oldProfileId);
         }
 
-        // 2. Cargar datos desde la base de datos para el nuevo perfil
+        // 2. Asynchronously load database contents for target profile
         if (newProfile != null) {
             UUID newProfileId = newProfile.getProfileId();
             plugin.getDataManager().loadDataAsync(player, newProfileId);
@@ -117,53 +117,53 @@ public class ProfileSwitchListener implements Listener {
 
 ---
 
-## 4. Registro de Eventos Disponibles en ZenProfiles
+## 4. ZenProfiles Event Registry
 
-Todos los eventos se encuentran en el paquete `com.cuac_xd.zenprofiles.api.event`:
+All custom events are located in `com.cuac_xd.zenprofiles.api.event`:
 
-| Evento | Cancellable | Descripción |
+| Event | Cancellable | Description |
 | :--- | :---: | :--- |
-| **`ProfilePreSwitchEvent`** | **Sí** | Se dispara *antes* de que el jugador cambie de perfil. Permite cancelar el cambio si el jugador está en minijuegos, combates o mazmorras. |
-| **`ProfileSwitchEvent`** | No | Se dispara *después* de que se ha completado el cambio de perfil y aplicado las estadísticas. |
-| **`ProfileCreateEvent`** | No | Se dispara cuando un jugador crea un nuevo perfil (ej. al hacer clic en un slot de perfil disponible). |
-| **`ProfileDeleteEvent`** | No | Se dispara cuando un perfil ha sido eliminado permanentemente por el jugador. |
+| **`ProfilePreSwitchEvent`** | **Yes** | Fired *before* a profile switch occurs. Allows cancelling switches during combat, dungeons, or active minigames. |
+| **`ProfileSwitchEvent`** | No | Fired *after* a profile switch is completed and attributes are applied. |
+| **`ProfileCreateEvent`** | No | Fired when a new profile is created. |
+| **`ProfileDeleteEvent`** | No | Fired when a profile is permanently deleted. |
 
 ---
 
-## 5. Ejemplos Prácticos por Plugin de la Suite ZEN
+## 5. Code Examples by ZEN Suite Plugin
 
-### 🏦 Ejemplo A: ZenBank (Saldo bancario por perfil)
+### ZenBank (Per-Profile Bank Balance)
 ```java
-// Al depositar o consultar el saldo bancario de un jugador
+// Deposit or query bank balance
 UUID profileId = ProfileUtil.getTargetUUID(player);
-double saldo = zenBankAPI.getBalance(profileId);
+double balance = zenBankAPI.getBalance(profileId);
 ```
 
-### 🎒 Ejemplo B: ZenSacks (Sacos de ítems por perfil)
+### ZenSacks (Per-Profile Item Sacks)
 ```java
-// Al agregar ítems al saco
+// Insert items into sack
 UUID profileId = ProfileUtil.getTargetUUID(player);
 zenSacksAPI.addSackAmount(profileId, "mining", "cobblestone", 64);
 ```
 
-### 🧚 Ejemplo C: ZenFairy (Almas encontradas por perfil)
+### ZenFairy (Per-Profile Fairy Souls)
 ```java
-// Al descubrir un alma de hada
+// Mark discovered fairy soul
 UUID profileId = ProfileUtil.getTargetUUID(player);
 zenFairyAPI.addFoundSoul(profileId, "fairy", block.getLocation());
 ```
 
-### 🏆 Ejemplo D: ZenRankups (Rangos y estadísticas por perfil)
+### ZenRankups (Per-Profile Ranks & Stats)
 ```java
-// Al consultar el rango o subir de nivel
+// Query rank or execute rankup
 UUID profileId = ProfileUtil.getTargetUUID(player);
 String rankId = zenRankupsAPI.getPlayerRank(profileId);
 ```
 
 ---
 
-## 6. Resumen de Integración
+## 6. Summary
 
-1. Usa `ZenProfilesAPI.getActiveProfileUUID(player)` como la clave UUID primaria en tus llamadas a base de datos o arreglos de caché.
-2. Escucha `ProfileSwitchEvent` en cada plugin para sincronizar el intercambio de perfiles en memoria.
-3. Tus plugins funcionarán tanto de forma independiente como acoplados al 100% con **ZenProfiles** sin modificar la lógica interna de almacenamiento.
+1. Always use `ZenProfilesAPI.getActiveProfileUUID(player)` as the primary UUID key in database queries or cache maps.
+2. Listen to `ProfileSwitchEvent` across each plugin to handle in-memory cache transitions.
+3. Plugins will operate seamlessly both standalone and integrated with **ZenProfiles** without internal storage modifications.
