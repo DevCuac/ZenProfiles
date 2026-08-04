@@ -12,15 +12,24 @@ In each plugin within the ZEN suite, declare **`ZenProfiles`** as a soft depende
 softdepend: [ZenProfiles]
 ```
 
-In your `pom.xml` (or local dependency manifest):
+In your `pom.xml`, add the **JitPack** repository and the `ZenProfiles` dependency:
 
 ```xml
-<dependency>
-    <groupId>com.cuac_xd.zenprofiles</groupId>
-    <artifactId>ZenProfiles</artifactId>
-    <version>1.0.0</version>
-    <scope>provided</scope>
-</dependency>
+<repositories>
+    <repository>
+        <id>jitpack.io</id>
+        <url>https://jitpack.io</url>
+    </repository>
+</repositories>
+
+<dependencies>
+    <dependency>
+        <groupId>com.github.cuac-xd</groupId>
+        <artifactId>ZenProfiles</artifactId>
+        <version>1.0.0</version>
+        <scope>provided</scope>
+    </dependency>
+</dependencies>
 ```
 
 ---
